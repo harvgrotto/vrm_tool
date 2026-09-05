@@ -1,0 +1,6 @@
+constants.py
+source/
+Data/
+__pycache__/
+*.pyc
+outputs.csv
