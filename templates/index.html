@@ -245,6 +245,19 @@
 <h1>Personalized Video Test Pipeline</h1>
 <div class="subtitle">sync.so + ElevenLabs — tweak, generate, compare</div>
 
+<button type="button" id="previewCustomerBtn" style="
+  width:100%; margin-bottom:22px; padding:16px;
+  background:linear-gradient(135deg, #1E2761, #2E3B8F);
+  color:#fff; border:none; border-radius:12px;
+  font-family:'Sora',sans-serif; font-size:15px; font-weight:600;
+  cursor:pointer; box-shadow:0 4px 14px rgba(30,39,97,0.35);
+">
+  🎬 Preview Customer Experience
+  <div style="font-weight:400; font-size:12px; opacity:0.85; margin-top:4px; font-family:'Inter',sans-serif;">
+    See what the customer actually sees, using your current settings below
+  </div>
+</button>
+
 <form id="genForm">
   <label>Video URL</label>
   <input name="video" value="https://james-harvey.com/james_higher_res.mp4" required>
@@ -342,6 +355,11 @@
     Auto-select video by name length <span class="hint">(Claude buckets the name short/medium/long and picks a matching video below)</span>
   </label>
 
+  <label style="display:flex; align-items:center; gap:8px; margin-top:12px;">
+    <input type="checkbox" name="use_validation" style="width:auto; margin:0;">
+    Validate pronunciation <span class="hint">(transcribes the TTS audio via Scribe and flags likely mismatches — a triage signal, not a verdict)</span>
+  </label>
+
   <div id="variantSlots" class="variant-box" style="display:none;">
     <div style="font-size:12px; color:var(--text-dim); margin-bottom:10px;">Define each variant once, then reuse them for every future name.</div>
 
@@ -421,8 +439,92 @@
     <button type="button" id="namesBatchBtn" class="lane-btn" style="margin-top:8px;">Run Name List</button>
   </div>
 
+  <div class="section-block">
+    <label class="lane-label"><span class="lane-dot" style="background:#8A8FA3;"></span> Safeguard fallback <span class="hint">(used by the customer-experience preview if generation fails or takes too long)</span></label>
+    <label style="margin-top:10px;">Fallback video URL</label>
+    <input name="fallback_video" placeholder="https://.../default-non-personalized-video.mp4">
+    <div class="row" style="margin-top:10px; align-items:flex-end;">
+      <div style="flex:0 0 180px;">
+        <label style="margin-top:0;">Fallback timeout (sec)</label>
+        <input name="fallback_timeout" type="number" min="10" max="120" value="45">
+      </div>
+    </div>
+  </div>
+
   <button type="submit" id="submitBtn" class="lane-btn">Generate</button>
+
+  <button type="button" id="syncDiagBtn" style="width:100%; margin-top:10px; padding:10px; background:#3a3a3a; color:#fff; border:1px dashed #777;">
+    🔧 Run Synchronous Test (diagnostic — no threading, will wait ~1min)
+  </button>
 </form>
+
+<!-- Customer Experience Preview Modal — styled as a clean, branded customer-facing
+     page, deliberately distinct from the dark engineering console around it. -->
+<div id="customerModalOverlay" style="
+  display:none; position:fixed; inset:0; background:rgba(15,17,21,0.72);
+  z-index:1000; align-items:center; justify-content:center; padding:20px;
+">
+  <div id="customerModalCard" style="
+    background:#fff; border-radius:20px; max-width:440px; width:100%;
+    padding:36px 32px; position:relative; text-align:center;
+    box-shadow:0 20px 60px rgba(0,0,0,0.35);
+    font-family:'Inter',-apple-system,sans-serif;
+  ">
+    <button type="button" id="customerModalClose" style="
+      position:absolute; top:14px; right:16px; background:none; border:none;
+      font-size:22px; color:#9AA2B4; cursor:pointer; line-height:1; padding:4px;
+    ">&times;</button>
+
+    <!-- State 1: name entry -->
+    <div id="cmStateEntry">
+      <div style="font-size:34px; margin-bottom:10px;">👋</div>
+      <div style="font-family:'Cambria',serif; font-size:22px; font-weight:700; color:#1E2761; margin-bottom:8px;">
+        Get Your Personalized Video
+      </div>
+      <div style="color:#5A6478; font-size:14px; margin-bottom:22px;">
+        Enter your first name to see your personalized message.
+      </div>
+      <input id="cmNameInput" type="text" placeholder="Your first name" style="
+        width:100%; padding:13px 14px; border:1px solid #D8DCE8; border-radius:10px;
+        font-size:15px; margin-bottom:16px; text-align:center; box-sizing:border-box;
+      ">
+      <button type="button" id="cmSubmitBtn" style="
+        width:100%; padding:14px; background:#1E2761; color:#fff; border:none;
+        border-radius:10px; font-size:15px; font-weight:600; cursor:pointer;
+        font-family:'Sora',sans-serif;
+      ">Get My Video</button>
+    </div>
+
+    <!-- State 2: waiting -->
+    <div id="cmStateWaiting" style="display:none;">
+      <div style="
+        width:56px; height:56px; margin:0 auto 22px; border-radius:50%;
+        border:4px solid #E3E7F5; border-top-color:#1E2761;
+        animation:cmSpin 0.9s linear infinite;
+      "></div>
+      <div id="cmWaitingMessage" style="font-size:16px; color:#1E2761; font-weight:600; min-height:44px;">
+        One moment — we're retrieving your message...
+      </div>
+    </div>
+
+    <!-- State 3: video ready -->
+    <div id="cmStateVideo" style="display:none;">
+      <div style="font-family:'Cambria',serif; font-size:20px; font-weight:700; color:#1E2761; margin-bottom:16px;">
+        Here's your personalized message!
+      </div>
+      <video id="cmVideo" controls autoplay style="width:100%; border-radius:12px; background:#000;"></video>
+      <div id="cmFallbackNote" style="display:none; margin-top:10px; font-size:10.5px; color:#B8BCC8;">(fallback video shown)</div>
+      <button type="button" id="cmCloseBtn" style="
+        margin-top:20px; padding:11px 24px; background:#EEF0FA; color:#1E2761;
+        border:none; border-radius:10px; font-size:14px; font-weight:600; cursor:pointer;
+        font-family:'Sora',sans-serif;
+      ">Close</button>
+    </div>
+  </div>
+</div>
+<style>
+@keyframes cmSpin { to { transform: rotate(360deg); } }
+</style>
 
 <div id="status" style="display:none;"></div>
 <div id="result" style="display:none;"></div>
@@ -522,6 +624,7 @@ async function pollBatch(batchUuid) {
       <div style="border-top:1px solid var(--border); padding:10px 0;">
         <span class="status-badge ${badgeClass}">${r.status}</span>
         <span style="margin-left:8px; font-size:12px; color:var(--text-dim);">Run ${r.run_number} &middot; ⏱ ${formatDuration(r.duration_seconds)}</span>
+        ${validationBadgeHtml(r.validation)}
         ${vid}
       </div>
     `;
@@ -582,6 +685,7 @@ async function pollGrid(gridUuid) {
       return `<div style="margin-top:8px;">
                 <span class="status-badge ${badgeClass}" style="font-size:9.5px;">${r.status}</span>
                 <span style="font-size:11px; color:var(--text-faint); margin-left:4px;">⏱ ${formatDuration(r.duration_seconds)}</span>
+                ${validationBadgeHtml(r.validation)}
                 ${vid}
               </div>`;
     }).join('');
@@ -666,6 +770,7 @@ async function pollNamesBatch(batchUuid) {
         <span class="status-badge ${badgeClass}">${r.status}</span>
         <b style="margin-left:8px;">${r.name}</b>${phoneticNote}
         <span style="margin-left:8px; font-size:12px; color:var(--text-dim);">⏱ ${formatDuration(r.duration_seconds)}</span>
+        ${validationBadgeHtml(r.validation)}
         ${vid}
       </div>
     `;
@@ -685,6 +790,32 @@ async function pollNamesBatch(batchUuid) {
   }
 }
 
+function validationBadgeHtml(validation) {
+  if (!validation || !validation.tier || validation.tier === 'unknown') return '';
+  const styles = {
+    high:       { bg: 'var(--success-bg)', color: 'var(--success)',    icon: '✓' },
+    borderline: { bg: 'var(--lane-batch-bg)', color: 'var(--lane-batch)', icon: '?' },
+    low:        { bg: 'var(--fail-bg)',    color: 'var(--fail)',       icon: '⚠' },
+  };
+  const s = styles[validation.tier];
+  if (!s) return '';
+  const transcript = (validation.transcript || '?').replace(/"/g, '&quot;');
+  const pct = Math.round((validation.similarity || 0) * 100);
+  return `<span class="status-badge" style="background:${s.bg}; color:${s.color}; margin-left:6px;" title="Heard: &quot;${transcript}&quot; — ${pct}% match">${s.icon} ${validation.tier}</span>`;
+}
+
+function validationTierHtml(validation) {
+  if (!validation || !validation.tier || validation.tier === 'unknown') return '';
+  const colors = { high: 'var(--success)', borderline: 'var(--lane-batch)', low: 'var(--fail)' };
+  const labels = { high: 'High confidence', borderline: 'Borderline — worth a listen', low: 'Low confidence — likely mismatch' };
+  const color = colors[validation.tier] || 'var(--text-dim)';
+  const label = labels[validation.tier] || validation.tier;
+  return `<div style="margin-bottom:8px; font-size:13px;">
+    Pronunciation check: <b style="color:${color};">${label}</b>
+    <span style="color:var(--text-faint); font-size:11.5px;"> (heard: "${validation.transcript || '?'}", ${Math.round((validation.similarity || 0) * 100)}% match)</span>
+  </div>`;
+}
+
 function formatDuration(seconds) {
   if (seconds == null) return '';
   if (seconds < 60) return `${seconds}s`;
@@ -692,6 +823,25 @@ function formatDuration(seconds) {
   const s = Math.round(seconds % 60);
   return `${m}m ${s}s`;
 }
+
+// --- TEMPORARY: synchronous diagnostic test (no threading) ---
+document.getElementById('syncDiagBtn').addEventListener('click', async () => {
+  statusBox.style.display = 'block';
+  statusBox.textContent = 'Running synchronous test — no polling, this will just wait until it finishes (up to ~1-2 min)...';
+  resultBox.style.display = 'none';
+  batchResultBox.style.display = 'none';
+  gridResultBox.style.display = 'none';
+  namesBatchResultBox.style.display = 'none';
+
+  const formData = new FormData(form);
+  try {
+    const res = await fetch(BASE_URL + '/generate-sync-diagnostic', { method: 'POST', body: formData, cache: 'no-store' });
+    const data = await res.json();
+    statusBox.textContent = 'Sync test result: ' + JSON.stringify(data, null, 2);
+  } catch (e) {
+    statusBox.textContent = 'Sync test threw an error: ' + e;
+  }
+});
 
 // --- submit / generate ---
 form.addEventListener('submit', async (e) => {
@@ -733,10 +883,12 @@ async function pollStatus(jobUuid) {
     const bucketLine = data.length_bucket
       ? `<div style="margin-bottom:8px; color:var(--text-dim); font-size:13px;">Video variant used: <b style="color:var(--text);">${data.length_bucket}</b></div>`
       : '';
+    const validationLine = validationTierHtml(data.validation);
     resultBox.innerHTML = `
       <div class="result-panel">
         ${phoneticLine}
         ${bucketLine}
+        ${validationLine}
         <a class="btn" href="${data.output_url}" target="_blank">▶ Open result</a>
         <span class="duration-tag">⏱ ${formatDuration(data.duration_seconds)}</span>
         <video controls src="${data.output_url}"></video>
@@ -813,6 +965,14 @@ async function loadHistory() {
 
     const nameLabel = entry.text || rec.name || '';
 
+    const validationBadge = (() => {
+      if (!rec.validation || !rec.validation.tier || rec.validation.tier === 'unknown') return '';
+      const colors = { high: 'var(--success)', borderline: 'var(--lane-batch)', low: 'var(--fail)' };
+      const icons = { high: '✓', borderline: '?', low: '⚠' };
+      const color = colors[rec.validation.tier] || 'var(--text-dim)';
+      return ` &nbsp;·&nbsp; <span style="color:${color}; font-weight:600;">${icons[rec.validation.tier] || ''} pronunciation ${rec.validation.tier}</span>`;
+    })();
+
     div.innerHTML = `
       <div class="meta">
         <span class="status-badge ${statusClass(rec.status)}">${rec.status}</span>
@@ -821,7 +981,7 @@ async function loadHistory() {
         <br>
         <b>${nameLabel}</b> &nbsp;·&nbsp;
         segment ${entry.segment_start}s&ndash;${entry.segment_end}s &nbsp;·&nbsp;
-        ${entry.sync_mode || ''} / ${entry.lipsync_model || ''} / temp ${entry.temperature ?? ''}${phoneticNote}${reactNote}
+        ${entry.sync_mode || ''} / ${entry.lipsync_model || ''} / temp ${entry.temperature ?? ''}${phoneticNote}${reactNote}${validationBadge}
       </div>
       ${videoHtml}
       <button type="button" class="reuse-btn" style="margin-top:10px;">Reuse these settings</button>
@@ -835,6 +995,180 @@ async function loadHistory() {
 
 // load history on page open (survives page refresh as long as the server is still running)
 loadHistory();
+
+// ============================================================
+// Customer Experience Preview — simulates what an actual bank
+// customer sees: name entry -> friendly waiting animation ->
+// video plays automatically. Falls back seamlessly to a default
+// video if generation fails or exceeds the configured timeout.
+// ============================================================
+(function () {
+  const overlay = document.getElementById('customerModalOverlay');
+  const stateEntry = document.getElementById('cmStateEntry');
+  const stateWaiting = document.getElementById('cmStateWaiting');
+  const stateVideo = document.getElementById('cmStateVideo');
+  const nameInput = document.getElementById('cmNameInput');
+  const submitBtn = document.getElementById('cmSubmitBtn');
+  const waitingMessageEl = document.getElementById('cmWaitingMessage');
+  const videoEl = document.getElementById('cmVideo');
+  const fallbackNote = document.getElementById('cmFallbackNote');
+
+  let cmPollTimer = null;
+  let cmMessageTimer = null;
+  let cmStartTime = null;
+  let cmTimeoutMs = 45000;
+  let cmFallbackUrl = '';
+
+  function showState(state) {
+    stateEntry.style.display = state === 'entry' ? 'block' : 'none';
+    stateWaiting.style.display = state === 'waiting' ? 'block' : 'none';
+    stateVideo.style.display = state === 'video' ? 'block' : 'none';
+  }
+
+  function openModal() {
+    overlay.style.display = 'flex';
+    showState('entry');
+    nameInput.value = '';
+    fallbackNote.style.display = 'none';
+    videoEl.pause();
+    videoEl.removeAttribute('src');
+    setTimeout(() => nameInput.focus(), 50);
+  }
+
+  function closeModal() {
+    overlay.style.display = 'none';
+    clearInterval(cmPollTimer);
+    clearInterval(cmMessageTimer);
+    videoEl.pause();
+  }
+
+  function startWaitingMessages(name) {
+    const messages = [
+      `One moment, ${name} — we're retrieving your message...`,
+      "It's almost here...",
+      "Just a little longer...",
+      "Thanks for your patience — almost done...",
+    ];
+    let i = 0;
+    waitingMessageEl.textContent = messages[0];
+    cmMessageTimer = setInterval(() => {
+      i = (i + 1) % messages.length;
+      waitingMessageEl.textContent = messages[i];
+    }, 4000);
+  }
+
+  function showVideo(url, noteType) {
+    // noteType: 'fresh' (no note), 'fallback' (gray note), 'cached' (green note)
+    clearInterval(cmPollTimer);
+    clearInterval(cmMessageTimer);
+    videoEl.src = url;
+    if (noteType === 'fallback') {
+      fallbackNote.textContent = '(fallback video shown)';
+      fallbackNote.style.color = '#B8BCC8';
+      fallbackNote.style.display = 'block';
+    } else if (noteType === 'cached') {
+      fallbackNote.textContent = '(served instantly from cache)';
+      fallbackNote.style.color = '#1E8E5A';
+      fallbackNote.style.display = 'block';
+    } else {
+      fallbackNote.style.display = 'none';
+    }
+    showState('video');
+    videoEl.play().catch(() => {});
+  }
+
+  async function pollPreview(jobUuid) {
+    const elapsed = Date.now() - cmStartTime;
+
+    if (elapsed >= cmTimeoutMs) {
+      showVideo(cmFallbackUrl, 'fallback');
+      return;
+    }
+
+    try {
+      const res = await fetch(BASE_URL + '/status/' + jobUuid + '?_=' + Date.now(), { cache: 'no-store' });
+      const data = await res.json();
+
+      if (data.status === 'COMPLETED') {
+        showVideo(data.output_url, 'fresh');
+      } else if (data.status === 'FAILED') {
+        showVideo(cmFallbackUrl, 'fallback');
+      }
+      // else still in progress — keep polling, the interval will call this again
+    } catch (e) {
+      // Network hiccup mid-poll — don't fail the customer experience over it,
+      // just let the next poll tick try again (the overall timeout still applies).
+    }
+  }
+
+  document.getElementById('previewCustomerBtn').addEventListener('click', openModal);
+  document.getElementById('customerModalClose').addEventListener('click', closeModal);
+  document.getElementById('cmCloseBtn').addEventListener('click', closeModal);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
+
+  async function submitPreview() {
+    const name = nameInput.value.trim();
+    if (!name) { nameInput.focus(); return; }
+
+    cmFallbackUrl = form.elements['fallback_video'].value.trim();
+    const timeoutSec = parseFloat(form.elements['fallback_timeout'].value) || 45;
+    cmTimeoutMs = timeoutSec * 1000;
+
+    const video = form.elements['video'].value.trim();
+    const voiceId = form.elements['voice_id'].value.trim();
+
+    // Check whether this exact name + video + voice has already been
+    // rendered — if so, skip generation entirely and serve it instantly,
+    // mirroring the production pre-rendered-cache concept.
+    showState('waiting');
+    startWaitingMessages(name);
+    waitingMessageEl.textContent = 'Checking for your video...';
+
+    try {
+      const cacheParams = new URLSearchParams({ name, video, voice_id: voiceId });
+      const cacheRes = await fetch(BASE_URL + '/check-cache?' + cacheParams.toString() + '&_=' + Date.now(), { cache: 'no-store' });
+      const cacheData = await cacheRes.json();
+
+      if (cacheData.found) {
+        clearInterval(cmMessageTimer);
+        waitingMessageEl.textContent = 'Found it!';
+        setTimeout(() => showVideo(cacheData.output_url, 'cached'), 600);
+        return;
+      }
+    } catch (e) {
+      // Cache check failing shouldn't block the normal flow — fall through
+      // to a fresh generation below.
+    }
+
+    cmStartTime = Date.now();
+
+    const formData = new FormData(form);
+    formData.set('text', name);
+    formData.set('source', 'preview');
+
+    try {
+      const res = await fetch(BASE_URL + '/generate', { method: 'POST', body: formData, cache: 'no-store' });
+      const data = await res.json();
+
+      if (data.error) {
+        // Missing required fields (e.g. no video URL configured) — fall back
+        // immediately if one's set, otherwise just surface the entry screen again.
+        if (cmFallbackUrl) { showVideo(cmFallbackUrl, 'fallback'); }
+        else { showState('entry'); }
+        return;
+      }
+
+      cmPollTimer = setInterval(() => pollPreview(data.job_uuid), 3000);
+      pollPreview(data.job_uuid);
+    } catch (e) {
+      if (cmFallbackUrl) { showVideo(cmFallbackUrl, 'fallback'); }
+      else { showState('entry'); }
+    }
+  }
+
+  submitBtn.addEventListener('click', submitPreview);
+  nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitPreview(); });
+})();
 </script>
 
 </body>
