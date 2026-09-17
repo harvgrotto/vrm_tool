@@ -116,6 +116,36 @@ os.makedirs(MEDIA_DIR, exist_ok=True)
 _history_lock = threading.Lock()
 
 
+def find_cached_video(name: str, video: str, voice_id: str) -> dict:
+    """
+    Looks through persistent history for a previous COMPLETED generation with
+    the same name, base video, and voice — the "identity" of a personalized
+    video. Ignores tuning knobs (sync_mode, model, temperature) since those
+    can be adjusted over time without changing which video is "the" video
+    for that name/spokesperson combo.
+
+    Returns the most recent match, or None if nothing found. This mirrors
+    the production caching concept: if it's already been rendered, serve
+    the existing file instead of generating again.
+    """
+    name_norm = name.strip().lower()
+    matches = []
+    for record in load_history():
+        if record.get('status') != 'COMPLETED':
+            continue
+        entry = record.get('entry', {})
+        if (entry.get('text', '').strip().lower() == name_norm
+                and entry.get('video') == video
+                and entry.get('voice_id') == voice_id
+                and record.get('output_url')):
+            matches.append(record)
+
+    if not matches:
+        return None
+    matches.sort(key=lambda r: r.get('timestamp', 0), reverse=True)
+    return matches[0]
+
+
 def load_history() -> list:
     if not os.path.exists(HISTORY_FILE):
         return []
@@ -166,6 +196,7 @@ def record_history(entry: dict, result: dict, source: str):
         'duration_seconds': result.get('duration_seconds'),
         'phonetic_text': result.get('phonetic_text'),
         'length_bucket': result.get('length_bucket'),
+        'validation': result.get('validation'),
     }
 
     with _history_lock:
@@ -176,6 +207,51 @@ def record_history(entry: dict, result: dict, source: str):
                 json.dump(history, f)
         except Exception as e:
             print(f"Failed to write history.json: {e}")
+
+
+import difflib
+
+
+def validate_pronunciation(audio_bytes: bytes, intended_name: str) -> dict:
+    """
+    Transcribes the generated TTS audio via ElevenLabs Scribe and compares it
+    against the intended name using a phonetic-ish fuzzy match (difflib's
+    SequenceMatcher on lowercased text — not a true phonetic algorithm, but a
+    reasonable first pass without adding a new dependency).
+
+    Returns a dict with the transcript, a 0-1 similarity score, and a tier:
+    'high' (>=0.85), 'borderline' (>=0.6), or 'low' (<0.6).
+
+    This is a triage signal, not a verdict — Scribe can itself mishear a
+    name, especially the same tricky ones TTS struggles with. Treat 'low' as
+    "worth a human listening," not "definitely wrong."
+    """
+    try:
+        response = requests.post(
+            "https://api.elevenlabs.io/v1/speech-to-text",
+            headers={"xi-api-key": ELEVENLABS_API_KEY},
+            data={"model_id": "scribe_v1"},
+            files={"file": ("audio.mp3", audio_bytes, "audio/mpeg")},
+            timeout=30,
+        )
+        response.raise_for_status()
+        transcript = response.json().get("text", "").strip()
+
+        a = intended_name.strip().lower()
+        b = transcript.strip().lower()
+        similarity = difflib.SequenceMatcher(None, a, b).ratio()
+
+        if similarity >= 0.85:
+            tier = "high"
+        elif similarity >= 0.6:
+            tier = "borderline"
+        else:
+            tier = "low"
+
+        return {"transcript": transcript, "similarity": round(similarity, 2), "tier": tier}
+    except Exception as e:
+        print(f"Pronunciation validation failed (non-fatal): {e}")
+        return {"transcript": None, "similarity": None, "tier": "unknown", "error": str(e)}
 
 
 def get_phonetic_spelling(name: str) -> str:
@@ -304,6 +380,12 @@ def execute_pipeline(entry: dict, source: str = 'single') -> dict:
         # 1. Generate speech via ElevenLabs (reuses existing VoiceProcessor)
         input_audio = voice_service.generate_speech(tts_entry)
 
+        # 1b. Optional: validate pronunciation by transcribing the TTS audio
+        # and comparing it against the intended name (see the validator
+        # design discussed — a triage signal, not a verdict).
+        if entry.get('use_validation'):
+            result['validation'] = validate_pronunciation(input_audio, entry['text'])
+
         # 2. Write to a temp mp3 and upload so Sync can fetch it via URL
         tmp_dir = os.path.join(ROOT_DIR, "Data", "Inputs")
         os.makedirs(tmp_dir, exist_ok=True)
@@ -354,10 +436,10 @@ def execute_pipeline(entry: dict, source: str = 'single') -> dict:
     return result
 
 
-def run_generation(job_uuid: str, entry: dict):
+def run_generation(job_uuid: str, entry: dict, source: str = 'single'):
     """Runs a single generation and writes progress/result into JOBS for polling."""
     JOBS[job_uuid]['created_at'] = JOBS[job_uuid].get('created_at', time.time())
-    result = execute_pipeline(entry, source='single')
+    result = execute_pipeline(entry, source=source)
     JOBS[job_uuid].update(result)
     JOBS[job_uuid]['completed_at'] = time.time()
 
@@ -445,6 +527,7 @@ def build_entry_from_form(form) -> dict:
         'model_mode': form.get('model_mode', 'lips'),
         'emotion': form.get('emotion', ''),
         'use_phonetic': form.get('use_phonetic') == 'on',
+        'use_validation': form.get('use_validation') == 'on',
         'use_length_variants': form.get('use_length_variants') == 'on',
         'variants': {
             'short': {
@@ -495,6 +578,7 @@ def generate_sync_diagnostic():
 def generate():
     entry = build_entry_from_form(request.form)
     entry['_base_path'] = request.script_root
+    source = request.form.get('source', 'single')
 
     if not entry['video'] or not entry['text'] or not entry['voice_id']:
         return jsonify({'error': 'video, text, and voice_id are required.'}), 400
@@ -502,7 +586,7 @@ def generate():
     job_uuid = str(uuid.uuid4())
     JOBS[job_uuid] = {'status': 'STARTING', 'entry': entry, 'created_at': time.time()}
 
-    thread = threading.Thread(target=run_generation, args=(job_uuid, entry), daemon=True)
+    thread = threading.Thread(target=run_generation, args=(job_uuid, entry, source), daemon=True)
     thread.start()
 
     return jsonify({'job_uuid': job_uuid})
@@ -699,6 +783,27 @@ def history():
     records = load_history()
     records.sort(key=lambda r: r.get('timestamp', 0), reverse=True)
     return jsonify(records)
+
+
+@app.route('/check-cache')
+def check_cache():
+    """
+    Used by the Customer Experience Preview: checks whether this exact
+    name + video + voice combo has already been successfully rendered, so
+    the preview can serve the existing file instantly instead of generating
+    again — mirroring the production pre-rendered-cache concept.
+    """
+    name = request.args.get('name', '')
+    video = request.args.get('video', '')
+    voice_id = request.args.get('voice_id', '')
+
+    if not name or not video or not voice_id:
+        return jsonify({'found': False})
+
+    match = find_cached_video(name, video, voice_id)
+    if match:
+        return jsonify({'found': True, 'output_url': match['output_url']})
+    return jsonify({'found': False})
 
 
 if __name__ == '__main__':
