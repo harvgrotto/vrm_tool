@@ -197,6 +197,7 @@ def record_history(entry: dict, result: dict, source: str):
         'phonetic_text': result.get('phonetic_text'),
         'length_bucket': result.get('length_bucket'),
         'validation': result.get('validation'),
+        'slots': result.get('slots'),
     }
 
     with _history_lock:
@@ -389,12 +390,18 @@ def execute_pipeline(entry: dict, source: str = 'single') -> dict:
         # 2. Write to a temp mp3 and upload so Sync can fetch it via URL
         tmp_dir = os.path.join(ROOT_DIR, "Data", "Inputs")
         os.makedirs(tmp_dir, exist_ok=True)
-        tmp_aud = os.path.join(tmp_dir, f"webapp_gen_aud_{uuid.uuid4()}.mp3")
-        with open(tmp_aud, "wb") as f:
-            f.write(input_audio)
 
-        aud_url = file_processor.upload_file_uguu(tmp_aud)
-        os.remove(tmp_aud)
+        def _upload(audio_bytes):
+            tmp = os.path.join(tmp_dir, f"webapp_gen_aud_{uuid.uuid4()}.mp3")
+            with open(tmp, "wb") as f:
+                f.write(audio_bytes)
+            try:
+                return file_processor.upload_file_uguu(tmp)
+            finally:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+
+        aud_url = _upload(input_audio)
 
         if not aud_url:
             result['status'] = 'FAILED'
@@ -404,6 +411,25 @@ def execute_pipeline(entry: dict, source: str = 'single') -> dict:
             return result
 
         entry['audio'] = aud_url
+        entry.pop('audio2', None)
+
+        # 2b. Optional second name window ("name, oh name ..."). Reuses the same
+        # audio unless a separate second-take text was given (different emphasis).
+        if entry.get('double_name') and entry.get('segment2_end', 0) > entry.get('segment2_start', 0):
+            if entry.get('text2'):
+                t2 = dict(tts_entry)
+                t2['text'] = entry['text2']
+                aud2_url = _upload(voice_service.generate_speech(t2))
+                if not aud2_url:
+                    result['status'] = 'FAILED'
+                    result['error'] = 'Failed to upload second-take audio.'
+                    result['duration_seconds'] = round(time.time() - started_at, 1)
+                    record_history(entry, result, source)
+                    return result
+            else:
+                aud2_url = aud_url
+            entry['audio2'] = aud2_url
+        result['slots'] = 2 if entry.get('audio2') else 1
 
         # 3. Submit the lipsync job (reuses existing LipSyncProcessor, temperature-aware)
         response_json = lipsync_service.process_lip_sync(entry)
@@ -520,6 +546,10 @@ def build_entry_from_form(form) -> dict:
         'voice_id': form.get('voice_id', '').strip(),
         'segment_start': float(form.get('segment_start', 0)),
         'segment_end': float(form.get('segment_end', 1)),
+        'double_name': form.get('double_name') == 'on',
+        'segment2_start': float(form.get('segment2_start') or 0),
+        'segment2_end': float(form.get('segment2_end') or 0),
+        'text2': form.get('text2', '').strip(),
         'sync_mode': form.get('sync_mode', 'bounce'),
         'lipsync_model': form.get('lipsync_model', 'lipsync-2'),
         'tts_model': form.get('tts_model', 'eleven_multilingual_v2'),
