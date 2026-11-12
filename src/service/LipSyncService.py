@@ -2,7 +2,7 @@ from typing import Dict
 import time
 import json
 from sync import Sync
-from sync.common import Audio, GenerationOptions, Video
+from sync.common import Audio, GenerationOptions, Video, GenerationSegment, SegmentAudioInput
 from sync.core.api_error import ApiError
 
 
@@ -142,20 +142,44 @@ class LipSyncProcessor():
             )
 
         try:
-            response = self.client.generations.create(
-                input=[
-                    Video(
-                        url=entry['video'],
-                        segments_secs=[[entry['segment_start'], entry['segment_end']]],
-                    ),
-                    Audio(
-                        url=entry['audio'],
-                    ),
-                ],
-                model=entry['lipsync_model'],
-                options=options,
-            )
-            
+            if entry.get('audio2') and entry.get('segment2_start') is not None:
+                # Two name windows in ONE generation: one job, one poll.
+                # Uses the top-level `segments` array (segments_secs is
+                # deprecated and can't carry multiple audio inputs).
+                response = self.client.generations.create(
+                    input=[
+                        Video(url=entry['video']),
+                        Audio(url=entry['audio'], ref_id="audio_1"),
+                        Audio(url=entry['audio2'], ref_id="audio_2"),
+                    ],
+                    segments=[
+                        GenerationSegment(
+                            start_time=float(entry['segment_start']),
+                            end_time=float(entry['segment_end']),
+                            audio_input=SegmentAudioInput(ref_id="audio_1"),
+                        ),
+                        GenerationSegment(
+                            start_time=float(entry['segment2_start']),
+                            end_time=float(entry['segment2_end']),
+                            audio_input=SegmentAudioInput(ref_id="audio_2"),
+                        ),
+                    ],
+                    model=entry['lipsync_model'],
+                    options=options,
+                )
+            else:
+                response = self.client.generations.create(
+                    input=[
+                        Video(
+                            url=entry['video'],
+                            segments_secs=[[entry['segment_start'], entry['segment_end']]],
+                        ),
+                        Audio(url=entry['audio']),
+                    ],
+                    model=entry['lipsync_model'],
+                    options=options,
+                )
+
             return json.loads(response.json())
         except ApiError as e:
             print(e.status_code)
