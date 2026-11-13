@@ -15,11 +15,16 @@ import threading
 import traceback
 import time
 import json
+import re
+import shutil
+import hashlib
+import subprocess
 import requests
 
 from flask import Flask, render_template, request, jsonify
 
 from src.service.LipSyncService import LipSyncProcessor
+from sync.core.api_error import ApiError
 from src.service.VoiceService import VoiceProcessor
 from src.Processor.FileProcessor import FileProcessor
 
@@ -198,6 +203,10 @@ def record_history(entry: dict, result: dict, source: str):
         'length_bucket': result.get('length_bucket'),
         'validation': result.get('validation'),
         'slots': result.get('slots'),
+        'stitched': result.get('stitched'),
+        'parts': result.get('parts'),
+        'render_seconds': result.get('render_seconds'),
+        'stitch_seconds': result.get('stitch_seconds'),
     }
 
     with _history_lock:
@@ -347,6 +356,105 @@ def classify_name_length(name: str) -> str:
         return 'medium'
 
 
+# --- Stitch mode: intro render + shared middle + outro render -> one video ---
+
+def get_ffmpeg_exe() -> str:
+    """System ffmpeg if present, otherwise the binary bundled by imageio-ffmpeg."""
+    exe = shutil.which('ffmpeg')
+    if exe:
+        return exe
+    import imageio_ffmpeg
+    return imageio_ffmpeg.get_ffmpeg_exe()
+
+
+def probe_clip(path: str) -> dict:
+    """Reads width/height/fps/has-audio from `ffmpeg -i` output (no ffprobe needed)."""
+    proc = subprocess.run([get_ffmpeg_exe(), '-hide_banner', '-i', path],
+                          capture_output=True, text=True)
+    info = proc.stderr
+    vline = next((l for l in info.splitlines() if 'Video:' in l), '')
+    size = re.search(r'(\d{2,5})x(\d{2,5})', vline)
+    fps = re.search(r'([\d.]+) fps', vline)
+    return {
+        'width': int(size.group(1)) if size else None,
+        'height': int(size.group(2)) if size else None,
+        'fps': float(fps.group(1)) if fps else None,
+        'has_audio': 'Audio:' in info,
+    }
+
+
+def download_to(url: str, path: str):
+    resp = requests.get(url, timeout=180, stream=True)
+    resp.raise_for_status()
+    with open(path, 'wb') as f:
+        for chunk in resp.iter_content(chunk_size=1 << 20):
+            f.write(chunk)
+
+
+def get_shared_clip(url: str) -> str:
+    """Downloads the shared (nameless) middle video once and reuses the local copy.
+    Cached by URL — if you replace the file at the same URL, delete Data/Outputs/shared_*.mp4."""
+    key = hashlib.md5(url.encode()).hexdigest()[:16]
+    path = os.path.join(MEDIA_DIR, f"shared_{key}.mp4")
+    if not os.path.exists(path):
+        download_to(url, path)
+    return path
+
+
+def stitch_clips(paths: list, out_path: str):
+    """Concatenates clips into one MP4, normalising size/fps/audio to the first clip
+    so differences between the renders and the shared middle can't cause glitches."""
+    infos = [probe_clip(p) for p in paths]
+    for p, i in zip(paths, infos):
+        if not i['width'] or not i['has_audio']:
+            raise ValueError(f"Clip {os.path.basename(p)} is missing a video or audio stream.")
+    W = infos[0]['width'] - infos[0]['width'] % 2
+    H = infos[0]['height'] - infos[0]['height'] % 2
+    fps = infos[0]['fps'] or 30
+    parts, labels = [], []
+    for n in range(len(paths)):
+        parts.append(
+            f"[{n}:v]scale={W}:{H}:force_original_aspect_ratio=decrease,"
+            f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps},format=yuv420p[v{n}];"
+            f"[{n}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[a{n}]"
+        )
+        labels.append(f"[v{n}][a{n}]")
+    fc = ";".join(parts) + ";" + "".join(labels) + f"concat=n={len(paths)}:v=1:a=1[v][a]"
+    cmd = [get_ffmpeg_exe(), '-y', '-hide_banner', '-loglevel', 'error']
+    for p in paths:
+        cmd += ['-i', p]
+    cmd += ['-filter_complex', fc, '-map', '[v]', '-map', '[a]',
+            '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18',
+            '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', out_path]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise RuntimeError(f"ffmpeg stitch failed: {proc.stderr[-600:]}")
+
+
+def render_entries(entries: list) -> dict:
+    """Submits several lip-sync jobs together and waits for all of them.
+    If the plan's concurrency limit (429) blocks a submission, that one waits
+    until the others finish and is then submitted. Returns {index: poll_result}."""
+    jobs, deferred = [], []
+    for i, e in enumerate(entries):
+        try:
+            jobs.append((i, lipsync_service.process_lip_sync(e)['id']))
+        except ApiError as err:
+            if getattr(err, 'status_code', None) == 429:
+                deferred.append((i, e))
+            else:
+                raise
+    results = {}
+    if jobs:
+        for r in lipsync_service.poll_for_status(jobs, timeout=900, interval=5):
+            results[r['idx']] = r
+    for i, e in deferred:
+        jid = lipsync_service.process_lip_sync(e)['id']
+        results[i] = lipsync_service.poll_for_status([(i, jid)], timeout=900, interval=5)[0]
+    return results
+
+
+
 def execute_pipeline(entry: dict, source: str = 'single') -> dict:
     """
     Runs the voice + lipsync pipeline for a single entry and returns a result dict.
@@ -439,6 +547,54 @@ def execute_pipeline(entry: dict, source: str = 'single') -> dict:
         if extra:
             entry['extra_slots'] = extra
         result['slots'] = 1 + len(extra)
+
+        # 3-STITCH. Intro + shared middle + outro: render intro and outro, then join.
+        if entry.get('stitch'):
+            entry.pop('extra_slots', None)
+            result['slots'] = 1
+            outro_audio = aud_url
+            if entry.get('text_outro'):
+                to = dict(tts_entry)
+                to['text'] = entry['text_outro']
+                outro_audio = _upload(voice_service.generate_speech(to))
+                if not outro_audio:
+                    raise ValueError('Failed to upload outro take audio.')
+
+            intro_e = dict(entry, audio=aud_url)
+            outro_e = dict(entry, audio=outro_audio,
+                           video=entry['outro_video'],
+                           segment_start=entry['outro_start'],
+                           segment_end=entry['outro_end'])
+            render_started = time.time()
+            res = render_entries([intro_e, outro_e])
+            result['render_seconds'] = round(time.time() - render_started, 1)
+            if any(res.get(i, {}).get('status') != 'COMPLETED' for i in (0, 1)):
+                bad = [str(res.get(i, {}).get('output_url', 'no result')) for i in (0, 1)
+                       if res.get(i, {}).get('status') != 'COMPLETED']
+                result['status'] = 'FAILED'
+                result['error'] = 'Render failed: ' + '; '.join(bad)
+            else:
+                run_id = str(uuid.uuid4())
+                base = entry.get('_base_path') if entry.get('_base_path') is not None else APP_BASE_PATH_FALLBACK
+                intro_path = os.path.join(MEDIA_DIR, f"{run_id}_intro.mp4")
+                outro_path = os.path.join(MEDIA_DIR, f"{run_id}_outro.mp4")
+                download_to(res[0].get('output_url'), intro_path)
+                download_to(res[1].get('output_url'), outro_path)
+                middle_path = get_shared_clip(entry['middle_video'])
+                final_path = os.path.join(MEDIA_DIR, f"{run_id}.mp4")
+                stitch_started = time.time()
+                stitch_clips([intro_path, middle_path, outro_path], final_path)
+                result['stitch_seconds'] = round(time.time() - stitch_started, 1)
+                result['status'] = 'COMPLETED'
+                result['stitched'] = True
+                result['output_url'] = f"{base}/media/{run_id}.mp4"
+                result['parts'] = {
+                    'intro': f"{base}/media/{run_id}_intro.mp4",
+                    'outro': f"{base}/media/{run_id}_outro.mp4",
+                }
+            result['duration_seconds'] = round(time.time() - started_at, 1)
+            record_history(entry, result, source)
+            return result
 
         # 3. Submit the lipsync job (reuses existing LipSyncProcessor, temperature-aware)
         response_json = lipsync_service.process_lip_sync(entry)
@@ -559,6 +715,12 @@ def build_entry_from_form(form) -> dict:
         'segment2_start': float(form.get('segment2_start') or 0),
         'segment2_end': float(form.get('segment2_end') or 0),
         'text2': form.get('text2', '').strip(),
+        'stitch': form.get('stitch') == 'on',
+        'outro_video': form.get('outro_video', '').strip(),
+        'outro_start': float(form.get('outro_start') or 0),
+        'outro_end': float(form.get('outro_end') or 0),
+        'middle_video': form.get('middle_video', '').strip(),
+        'text_outro': form.get('text_outro', '').strip(),
         'third_name': form.get('third_name') == 'on',
         'segment3_start': float(form.get('segment3_start') or 0),
         'segment3_end': float(form.get('segment3_end') or 0),
@@ -625,6 +787,9 @@ def generate():
 
     if not entry['video'] or not entry['text'] or not entry['voice_id']:
         return jsonify({'error': 'video, text, and voice_id are required.'}), 400
+    if entry['stitch'] and (not entry['outro_video'] or not entry['middle_video']
+                            or entry['outro_end'] <= entry['outro_start']):
+        return jsonify({'error': 'Stitch mode needs an outro video, outro window, and middle video.'}), 400
 
     job_uuid = str(uuid.uuid4())
     JOBS[job_uuid] = {'status': 'STARTING', 'entry': entry, 'created_at': time.time()}
