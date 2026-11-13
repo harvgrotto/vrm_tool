@@ -389,6 +389,8 @@
     </div>
     <label>Outro take text <span class="hint">(optional &mdash; blank reuses the intro audio)</span></label>
     <input name="text_outro" placeholder="e.g. Jenn.  (falling tone for the closing line)">
+    <label>Final video width (px) <span class="hint">(1280 = good for phones and light on memory; 0 = match the intro size)</span></label>
+    <input name="stitch_width" type="number" step="1" min="0" value="1280">
     <label>Shared middle video URL <span class="hint">(no name in it &mdash; never lip-synced)</span></label>
     <input name="middle_video" placeholder="https://.../middle.mp4">
   </div>
@@ -991,9 +993,30 @@ form.addEventListener('submit', async (e) => {
   pollStatus(jobUuid);
 });
 
+let pollFailures = 0;
 async function pollStatus(jobUuid) {
-  const res = await fetch(BASE_URL + '/status/' + jobUuid + '?_=' + Date.now(), { cache: 'no-store' });
-  const data = await res.json();
+  let res, data;
+  try {
+    res = await fetch(BASE_URL + '/status/' + jobUuid + '?_=' + Date.now(), { cache: 'no-store' });
+    data = await res.json();
+  } catch (e) {
+    // 502/503/504 from the host while the server restarts or is busy: keep retrying.
+    pollFailures = (pollFailures || 0) + 1;
+    statusBox.textContent = 'Server not responding (it may be restarting) — retrying… (' + pollFailures + ')';
+    if (pollFailures >= 40) {
+      clearInterval(pollTimer);
+      statusBox.textContent = 'Lost contact with the server. Check History in a minute — the render may have finished.';
+    }
+    return;
+  }
+  pollFailures = 0;
+  if (res.status === 404) {
+    // The server restarted and forgot this in-memory job.
+    clearInterval(pollTimer);
+    statusBox.textContent = 'The server restarted and lost track of this run. Check History — the render may still have completed.';
+    loadHistory();
+    return;
+  }
 
   if (data.status === 'COMPLETED') {
     clearInterval(pollTimer);
