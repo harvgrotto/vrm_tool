@@ -142,28 +142,29 @@ class LipSyncProcessor():
             )
 
         try:
-            if entry.get('audio2') and entry.get('segment2_start') is not None:
-                # Two name windows in ONE generation: one job, one poll.
-                # Uses the top-level `segments` array (segments_secs is
-                # deprecated and can't carry multiple audio inputs).
+            if entry.get('extra_slots'):
+                # Multiple name windows in ONE generation: one job, one poll.
+                # Slot 1 is the main window; extra_slots holds slots 2..N, each
+                # {'audio': url, 'start': s, 'end': e}. Uses the top-level
+                # `segments` array (segments_secs is deprecated and can't carry
+                # multiple audio inputs).
+                audio_inputs = [Audio(url=entry['audio'], ref_id="audio_1")]
+                segments = [GenerationSegment(
+                    start_time=float(entry['segment_start']),
+                    end_time=float(entry['segment_end']),
+                    audio_input=SegmentAudioInput(ref_id="audio_1"),
+                )]
+                for n, slot in enumerate(entry['extra_slots'], start=2):
+                    ref = f"audio_{n}"
+                    audio_inputs.append(Audio(url=slot['audio'], ref_id=ref))
+                    segments.append(GenerationSegment(
+                        start_time=float(slot['start']),
+                        end_time=float(slot['end']),
+                        audio_input=SegmentAudioInput(ref_id=ref),
+                    ))
                 response = self.client.generations.create(
-                    input=[
-                        Video(url=entry['video']),
-                        Audio(url=entry['audio'], ref_id="audio_1"),
-                        Audio(url=entry['audio2'], ref_id="audio_2"),
-                    ],
-                    segments=[
-                        GenerationSegment(
-                            start_time=float(entry['segment_start']),
-                            end_time=float(entry['segment_end']),
-                            audio_input=SegmentAudioInput(ref_id="audio_1"),
-                        ),
-                        GenerationSegment(
-                            start_time=float(entry['segment2_start']),
-                            end_time=float(entry['segment2_end']),
-                            audio_input=SegmentAudioInput(ref_id="audio_2"),
-                        ),
-                    ],
+                    input=[Video(url=entry['video'])] + audio_inputs,
+                    segments=segments,
                     model=entry['lipsync_model'],
                     options=options,
                 )
