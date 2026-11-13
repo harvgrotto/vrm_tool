@@ -401,34 +401,68 @@ def get_shared_clip(url: str) -> str:
     return path
 
 
-def stitch_clips(paths: list, out_path: str):
-    """Concatenates clips into one MP4, normalising size/fps/audio to the first clip
-    so differences between the renders and the shared middle can't cause glitches."""
-    infos = [probe_clip(p) for p in paths]
-    for p, i in zip(paths, infos):
-        if not i['width'] or not i['has_audio']:
-            raise ValueError(f"Clip {os.path.basename(p)} is missing a video or audio stream.")
-    W = infos[0]['width'] - infos[0]['width'] % 2
-    H = infos[0]['height'] - infos[0]['height'] % 2
-    fps = infos[0]['fps'] or 30
-    parts, labels = [], []
-    for n in range(len(paths)):
-        parts.append(
-            f"[{n}:v]scale={W}:{H}:force_original_aspect_ratio=decrease,"
-            f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps},format=yuv420p[v{n}];"
-            f"[{n}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[a{n}]"
-        )
-        labels.append(f"[v{n}][a{n}]")
-    fc = ";".join(parts) + ";" + "".join(labels) + f"concat=n={len(paths)}:v=1:a=1[v][a]"
-    cmd = [get_ffmpeg_exe(), '-y', '-hide_banner', '-loglevel', 'error']
-    for p in paths:
-        cmd += ['-i', p]
-    cmd += ['-filter_complex', fc, '-map', '[v]', '-map', '[a]',
-            '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18',
-            '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', out_path]
+def normalize_clip(src: str, dst: str, W: int, H: int, fps: float):
+    """Re-encodes ONE clip to the target size/fps/audio, one clip at a time so peak
+    memory stays low (a three-input filter graph used ~400 MB and OOM'd a 512 MB host)."""
+    cmd = [get_ffmpeg_exe(), '-y', '-hide_banner', '-loglevel', 'error', '-threads', '1',
+           '-i', src,
+           '-vf', (f"scale={W}:{H}:force_original_aspect_ratio=decrease,"
+                   f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps},format=yuv420p"),
+           '-af', 'aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo',
+           '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18',
+           '-x264-params', 'ref=1:rc-lookahead=0:bframes=0:threads=1',
+           '-c:a', 'aac', '-ar', '44100', '-ac', '2', '-b:a', '192k',
+           '-movflags', '+faststart', dst]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
-        raise RuntimeError(f"ffmpeg stitch failed: {proc.stderr[-600:]}")
+        raise RuntimeError(f"ffmpeg normalize failed: {proc.stderr[-600:]}")
+
+
+def stitch_three(intro_path: str, middle_path: str, outro_path: str, out_path: str,
+                 out_width: int = 0):
+    """intro + shared middle + outro -> one MP4. Each clip is normalised to the intro's
+    size/fps separately, then joined with a stream-copy concat (no re-encode, near-zero
+    memory). The normalised middle is cached next to the original, so the long shared
+    clip is only processed once."""
+    for pth in (intro_path, middle_path, outro_path):
+        i = probe_clip(pth)
+        if not i['width'] or not i['has_audio']:
+            raise ValueError(f"Clip {os.path.basename(pth)} is missing a video or audio stream.")
+    ref = probe_clip(intro_path)
+    W, H = ref['width'] - ref['width'] % 2, ref['height'] - ref['height'] % 2
+    # Optional delivery size: scale everything to out_width (height keeps the intro's
+    # aspect ratio). Smaller output = less memory and faster loading for end users;
+    # 0 means match the intro exactly.
+    if out_width and out_width < W:
+        H = round(H * out_width / W / 2) * 2
+        W = out_width - out_width % 2
+    fps = ref['fps'] or 30
+
+    mid_norm = f"{middle_path}.{W}x{H}x{fps}.norm.mp4"
+    if not os.path.exists(mid_norm):
+        tmp_mid = mid_norm + ".part.mp4"
+        normalize_clip(middle_path, tmp_mid, W, H, fps)
+        os.replace(tmp_mid, mid_norm)
+
+    intro_norm = intro_path + ".norm.mp4"
+    outro_norm = outro_path + ".norm.mp4"
+    list_path = out_path + ".txt"
+    try:
+        normalize_clip(intro_path, intro_norm, W, H, fps)
+        normalize_clip(outro_path, outro_norm, W, H, fps)
+        with open(list_path, 'w') as f:
+            for pth in (intro_norm, mid_norm, outro_norm):
+                f.write("file '" + pth.replace("'", "'\\''") + "'\n")
+        cmd = [get_ffmpeg_exe(), '-y', '-hide_banner', '-loglevel', 'error',
+               '-f', 'concat', '-safe', '0', '-i', list_path,
+               '-c', 'copy', '-movflags', '+faststart', out_path]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        if proc.returncode != 0:
+            raise RuntimeError(f"ffmpeg concat failed: {proc.stderr[-600:]}")
+    finally:
+        for pth in (intro_norm, outro_norm, list_path):
+            if os.path.exists(pth):
+                os.remove(pth)
 
 
 def render_entries(entries: list) -> dict:
@@ -583,7 +617,8 @@ def execute_pipeline(entry: dict, source: str = 'single') -> dict:
                 middle_path = get_shared_clip(entry['middle_video'])
                 final_path = os.path.join(MEDIA_DIR, f"{run_id}.mp4")
                 stitch_started = time.time()
-                stitch_clips([intro_path, middle_path, outro_path], final_path)
+                stitch_three(intro_path, middle_path, outro_path, final_path,
+                             out_width=int(entry.get('stitch_width') or 0))
                 result['stitch_seconds'] = round(time.time() - stitch_started, 1)
                 result['status'] = 'COMPLETED'
                 result['stitched'] = True
@@ -720,6 +755,7 @@ def build_entry_from_form(form) -> dict:
         'outro_start': float(form.get('outro_start') or 0),
         'outro_end': float(form.get('outro_end') or 0),
         'middle_video': form.get('middle_video', '').strip(),
+        'stitch_width': int(float(form.get('stitch_width') or 0)),
         'text_outro': form.get('text_outro', '').strip(),
         'third_name': form.get('third_name') == 'on',
         'segment3_start': float(form.get('segment3_start') or 0),
