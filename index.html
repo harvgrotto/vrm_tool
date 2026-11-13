@@ -1,0 +1,1329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Personalized Video Test Pipeline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0F1115;
+    --panel: #161A21;
+    --panel-alt: #1B2029;
+    --border: #262B36;
+    --border-soft: #1F2430;
+    --text: #E9ECF1;
+    --text-dim: #9AA2B4;
+    --text-faint: #5B6272;
+
+    --lane-generate: #4C8DFF;
+    --lane-generate-bg: rgba(76,141,255,0.12);
+    --lane-batch: #FFB020;
+    --lane-batch-bg: rgba(255,176,32,0.12);
+    --lane-grid: #2DD4BF;
+    --lane-grid-bg: rgba(45,212,191,0.12);
+    --lane-names: #FB6F92;
+    --lane-names-bg: rgba(251,111,146,0.12);
+
+    --success: #22C55E;
+    --success-bg: rgba(34,197,94,0.14);
+    --fail: #EF4444;
+    --fail-bg: rgba(239,68,68,0.14);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Inter', -apple-system, Segoe UI, sans-serif;
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 48px 20px 100px;
+    color: var(--text);
+    background: var(--bg);
+  }
+  h1 {
+    font-family: 'Sora', sans-serif;
+    font-size: 24px;
+    font-weight: 700;
+    margin-bottom: 6px;
+    letter-spacing: -0.01em;
+  }
+  .subtitle { color: var(--text-dim); font-size: 13px; margin-bottom: 32px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  h2 {
+    font-family: 'Sora', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-dim);
+    margin-top: 40px;
+    margin-bottom: 14px;
+  }
+  form {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 26px;
+  }
+  label { display: block; margin-top: 16px; font-weight: 600; font-size: 12.5px; color: var(--text-dim); }
+  input, select, textarea {
+    width: 100%;
+    padding: 10px 12px;
+    margin-top: 6px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 14px;
+    background: var(--panel-alt);
+    color: var(--text);
+    transition: border-color 0.15s ease;
+    font-family: 'Inter', sans-serif;
+  }
+  input:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: var(--lane-generate);
+  }
+  .row { display: flex; gap: 14px; }
+  .row > div { flex: 1; }
+  button {
+    padding: 10px 18px;
+    font-size: 14px;
+    cursor: pointer;
+    border: none;
+    border-radius: 8px;
+    font-family: 'Sora', sans-serif;
+    font-weight: 600;
+  }
+
+  /* --- lane action buttons --- */
+  .lane-btn {
+    width: 100%;
+    padding: 12px;
+    font-size: 14px;
+    transition: transform 0.1s ease, box-shadow 0.15s ease;
+  }
+  .lane-btn:hover { transform: translateY(-1px); }
+  .lane-btn:active { transform: translateY(0); }
+
+  #submitBtn {
+    margin-top: 24px;
+    padding: 14px;
+    font-size: 15px;
+    background: var(--lane-generate);
+    color: #0B1220;
+    box-shadow: 0 4px 14px rgba(76,141,255,0.3);
+  }
+  #batchBtn { background: var(--lane-batch); color: #241A00; box-shadow: 0 4px 14px rgba(255,176,32,0.25); }
+  #gridBtn { background: var(--lane-grid); color: #04211D; box-shadow: 0 4px 14px rgba(45,212,191,0.25); }
+  #namesBatchBtn { background: var(--lane-names); color: #2B0813; box-shadow: 0 4px 14px rgba(251,111,146,0.25); }
+
+  .lane-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .lane-dot {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  }
+
+  #status {
+    margin-top: 20px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 13.5px;
+    white-space: pre-wrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  #result, #batchResult, #gridResult, #namesBatchResult {
+    margin-top: 20px;
+  }
+  .result-panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--lane-generate);
+    border-radius: 12px;
+    padding: 20px;
+  }
+  #batchResult .result-panel { border-left-color: var(--lane-batch); }
+  #gridResult .result-panel { border-left-color: var(--lane-grid); }
+  #namesBatchResult .result-panel { border-left-color: var(--lane-names); }
+
+  #result a.btn, .reuse-btn {
+    display: inline-block;
+    padding: 9px 16px;
+    background: var(--lane-generate);
+    color: #0B1220;
+    text-decoration: none;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    border: none;
+    cursor: pointer;
+    font-family: 'Sora', sans-serif;
+  }
+  #result a.btn:hover, .reuse-btn:hover { opacity: 0.85; }
+  video {
+    max-width: 100%;
+    margin-top: 12px;
+    border-radius: 10px;
+    display: block;
+    background: #000;
+  }
+  .hint { font-weight: normal; color: var(--text-faint); font-size: 11.5px; }
+  .duration-tag {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 3px 9px;
+    border-radius: 20px;
+    background: var(--panel-alt);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 11px;
+    font-weight: 600;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  .nudge-row { display: flex; gap: 4px; margin-top: 6px; align-items: center; }
+  .nudge-row input { margin-top: 0; text-align: center; }
+  .nudge-btn {
+    padding: 8px 9px;
+    font-size: 11.5px;
+    background: var(--panel-alt);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--text-dim);
+    white-space: nowrap;
+    font-family: 'Inter', sans-serif;
+    font-weight: 500;
+  }
+  .nudge-btn:hover { background: var(--border); color: var(--text); }
+
+  .section-block {
+    margin-top: 28px;
+    padding-top: 22px;
+    border-top: 1px solid var(--border-soft);
+  }
+
+  .history-item {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    margin-top: 14px;
+    font-size: 13px;
+  }
+  .history-item .meta { color: var(--text-dim); margin-bottom: 10px; line-height: 1.7; }
+  .history-item .meta b { color: var(--text); font-size: 14px; }
+  .history-item video { max-width: 280px; display: block; }
+  .status-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    vertical-align: middle;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .status-COMPLETED { background: var(--success-bg); color: var(--success); }
+  .status-FAILED { background: var(--fail-bg); color: var(--fail); }
+  .status-other { background: var(--lane-batch-bg); color: var(--lane-batch); }
+  .empty-history { color: var(--text-faint); font-size: 13px; font-style: italic; }
+
+  .variant-box, .react-box {
+    margin-top: 14px;
+    padding: 14px;
+    background: var(--panel-alt);
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+  }
+</style>
+</head>
+<body>
+
+<h1>Personalized Video Test Pipeline</h1>
+<div class="subtitle">sync.so + ElevenLabs — tweak, generate, compare</div>
+
+<button type="button" id="previewCustomerBtn" style="
+  width:100%; margin-bottom:22px; padding:16px;
+  background:linear-gradient(135deg, #1E2761, #2E3B8F);
+  color:#fff; border:none; border-radius:12px;
+  font-family:'Sora',sans-serif; font-size:15px; font-weight:600;
+  cursor:pointer; box-shadow:0 4px 14px rgba(30,39,97,0.35);
+">
+  🎬 Preview Customer Experience
+  <div style="font-weight:400; font-size:12px; opacity:0.85; margin-top:4px; font-family:'Inter',sans-serif;">
+    See what the customer actually sees, using your current settings below
+  </div>
+</button>
+
+<form id="genForm">
+  <label>Video URL</label>
+  <input name="video" value="https://james-harvey.com/james_higher_res.mp4" required>
+
+  <label>Name / Text</label>
+  <input name="text" placeholder="e.g. Mario" required>
+
+  <div class="row">
+    <div>
+      <label>Segment start (sec)</label>
+      <div class="nudge-row">
+        <button type="button" class="nudge-btn" data-target="segment_start" data-delta="-0.5">-0.5</button>
+        <button type="button" class="nudge-btn" data-target="segment_start" data-delta="-0.1">-0.1</button>
+        <input name="segment_start" type="number" step="0.01" value="0.45" required>
+        <button type="button" class="nudge-btn" data-target="segment_start" data-delta="0.1">+0.1</button>
+        <button type="button" class="nudge-btn" data-target="segment_start" data-delta="0.5">+0.5</button>
+      </div>
+    </div>
+    <div>
+      <label>Segment end (sec)</label>
+      <div class="nudge-row">
+        <button type="button" class="nudge-btn" data-target="segment_end" data-delta="-0.5">-0.5</button>
+        <button type="button" class="nudge-btn" data-target="segment_end" data-delta="-0.1">-0.1</button>
+        <input name="segment_end" type="number" step="0.01" value="1.45" required>
+        <button type="button" class="nudge-btn" data-target="segment_end" data-delta="0.1">+0.1</button>
+        <button type="button" class="nudge-btn" data-target="segment_end" data-delta="0.5">+0.5</button>
+      </div>
+    </div>
+  </div>
+
+
+  <label style="display:flex; align-items:center; gap:8px; margin-top:12px;">
+    <input type="checkbox" name="double_name" id="doubleNameToggle" style="width:auto; margin:0;">
+    Name spoken twice <span class="hint">(second window, same render)</span>
+  </label>
+  <div id="doubleNameSlots" style="display:none;">
+    <div class="row">
+      <div>
+      <label>2nd window start (sec)</label>
+      <div class="nudge-row">
+        <button type="button" class="nudge-btn" data-target="segment2_start" data-delta="-0.5">-0.5</button>
+        <button type="button" class="nudge-btn" data-target="segment2_start" data-delta="-0.1">-0.1</button>
+        <input name="segment2_start" type="number" step="0.01" value="3.50">
+        <button type="button" class="nudge-btn" data-target="segment2_start" data-delta="0.1">+0.1</button>
+        <button type="button" class="nudge-btn" data-target="segment2_start" data-delta="0.5">+0.5</button>
+      </div>
+    </div>
+      <div>
+      <label>2nd window end (sec)</label>
+      <div class="nudge-row">
+        <button type="button" class="nudge-btn" data-target="segment2_end" data-delta="-0.5">-0.5</button>
+        <button type="button" class="nudge-btn" data-target="segment2_end" data-delta="-0.1">-0.1</button>
+        <input name="segment2_end" type="number" step="0.01" value="4.50">
+        <button type="button" class="nudge-btn" data-target="segment2_end" data-delta="0.1">+0.1</button>
+        <button type="button" class="nudge-btn" data-target="segment2_end" data-delta="0.5">+0.5</button>
+      </div>
+    </div>
+    </div>
+    <label>Second-take text <span class="hint">(optional &mdash; blank reuses the same audio)</span></label>
+    <input name="text2" placeholder="e.g. Mario!  (different emphasis for the 2nd mention)">
+  </div>
+
+
+  <label style="display:flex; align-items:center; gap:8px; margin-top:12px;">
+    <input type="checkbox" name="third_name" id="thirdNameToggle" style="width:auto; margin:0;">
+    Third name slot <span class="hint">(e.g. closing &ldquo;thank you, Name&rdquo;)</span>
+  </label>
+  <div id="thirdNameSlots" style="display:none;">
+    <div class="row">
+      <div>
+      <label>3rd window start (sec)</label>
+      <div class="nudge-row">
+        <button type="button" class="nudge-btn" data-target="segment3_start" data-delta="-0.5">-0.5</button>
+        <button type="button" class="nudge-btn" data-target="segment3_start" data-delta="-0.1">-0.1</button>
+        <input name="segment3_start" type="number" step="0.01" value="8.00">
+        <button type="button" class="nudge-btn" data-target="segment3_start" data-delta="0.1">+0.1</button>
+        <button type="button" class="nudge-btn" data-target="segment3_start" data-delta="0.5">+0.5</button>
+      </div>
+    </div>
+      <div>
+      <label>3rd window end (sec)</label>
+      <div class="nudge-row">
+        <button type="button" class="nudge-btn" data-target="segment3_end" data-delta="-0.5">-0.5</button>
+        <button type="button" class="nudge-btn" data-target="segment3_end" data-delta="-0.1">-0.1</button>
+        <input name="segment3_end" type="number" step="0.01" value="9.00">
+        <button type="button" class="nudge-btn" data-target="segment3_end" data-delta="0.1">+0.1</button>
+        <button type="button" class="nudge-btn" data-target="segment3_end" data-delta="0.5">+0.5</button>
+      </div>
+    </div>
+    </div>
+    <label>Third-take text <span class="hint">(optional &mdash; blank reuses slot 1 audio)</span></label>
+    <input name="text3" placeholder="e.g. Tanya.  (falling tone for the closing)">
+  </div>
+
+
+  <label style="display:flex; align-items:center; gap:8px; margin-top:16px;">
+    <input type="checkbox" name="stitch" id="stitchToggle" style="width:auto; margin:0;">
+    <b>Stitch mode</b> <span class="hint">(intro + shared middle + outro)</span>
+  </label>
+  <div id="stitchSlots" style="display:none;">
+    <div class="hint" style="margin:6px 0 8px;">
+      The Video URL and segment fields above are the <b>intro</b>. The intro and outro are rendered
+      (in parallel when your plan allows), then joined with the shared middle into one video.
+      Name-length variants and the extra name slots don&rsquo;t apply in this mode.
+    </div>
+    <label>Outro video URL</label>
+    <input name="outro_video" placeholder="https://.../outro.mp4">
+    <div class="row">
+      <div>
+      <label>Outro window start (sec)</label>
+      <div class="nudge-row">
+        <button type="button" class="nudge-btn" data-target="outro_start" data-delta="-0.5">-0.5</button>
+        <button type="button" class="nudge-btn" data-target="outro_start" data-delta="-0.1">-0.1</button>
+        <input name="outro_start" type="number" step="0.01" value="0.50">
+        <button type="button" class="nudge-btn" data-target="outro_start" data-delta="0.1">+0.1</button>
+        <button type="button" class="nudge-btn" data-target="outro_start" data-delta="0.5">+0.5</button>
+      </div>
+    </div>
+      <div>
+      <label>Outro window end (sec)</label>
+      <div class="nudge-row">
+        <button type="button" class="nudge-btn" data-target="outro_end" data-delta="-0.5">-0.5</button>
+        <button type="button" class="nudge-btn" data-target="outro_end" data-delta="-0.1">-0.1</button>
+        <input name="outro_end" type="number" step="0.01" value="1.50">
+        <button type="button" class="nudge-btn" data-target="outro_end" data-delta="0.1">+0.1</button>
+        <button type="button" class="nudge-btn" data-target="outro_end" data-delta="0.5">+0.5</button>
+      </div>
+    </div>
+    </div>
+    <label>Outro take text <span class="hint">(optional &mdash; blank reuses the intro audio)</span></label>
+    <input name="text_outro" placeholder="e.g. Jenn.  (falling tone for the closing line)">
+    <label>Final video width (px) <span class="hint">(1280 = good for phones and light on memory; 0 = match the intro size)</span></label>
+    <input name="stitch_width" type="number" step="1" min="0" value="1280">
+    <label>Shared middle video URL <span class="hint">(no name in it &mdash; never lip-synced)</span></label>
+    <input name="middle_video" placeholder="https://.../middle.mp4">
+  </div>
+
+  <label>Voice ID <span class="hint">(your ElevenLabs voice)</span></label>
+  <input name="voice_id" value="s3TPKV1kjDlVtZbl4Ksh" required>
+
+  <div class="row">
+    <div>
+      <label>Sync mode</label>
+      <select name="sync_mode">
+        <option value="bounce">bounce</option>
+        <option value="loop">loop</option>
+        <option value="cut_off">cut_off</option>
+        <option value="silence" selected>silence</option>
+        <option value="remap">remap</option>
+      </select>
+    </div>
+    <div>
+      <label>Lipsync model</label>
+      <select name="lipsync_model" id="modelSelect">
+        <option value="lipsync-2">lipsync-2</option>
+        <option value="lipsync-2-pro" selected>lipsync-2-pro</option>
+        <option value="sync-3">sync-3</option>
+        <option value="react-1">react-1 (expressive, 15s max)</option>
+      </select>
+    </div>
+  </div>
+
+  <div id="reactFields" class="react-box" style="display:none;">
+    <div style="font-size:12px; color:var(--text-dim); margin-bottom:10px;">react-1 only &mdash; controls how much of the performance gets regenerated.</div>
+    <div class="row">
+      <div>
+        <label style="margin-top:0;">Model mode</label>
+        <select name="model_mode">
+          <option value="lips">lips (mouth only, minimal changes)</option>
+          <option value="face">face (mouth + expressions)</option>
+          <option value="head">head (mouth + expressions + head movement)</option>
+        </select>
+      </div>
+      <div>
+        <label style="margin-top:0;">Emotion <span class="hint">(optional)</span></label>
+        <select name="emotion">
+          <option value="">— follow input video —</option>
+          <option value="happy">happy</option>
+          <option value="neutral">neutral</option>
+          <option value="surprised">surprised</option>
+          <option value="sad">sad</option>
+          <option value="angry">angry</option>
+          <option value="disgusted">disgusted</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <label>Temperature <span class="hint">(0 = calm, 1 = expressive, default 0.5)</span></label>
+  <input name="temperature" type="number" step="0.05" min="0" max="1" value="0.5">
+
+  <label>TTS model</label>
+  <input name="tts_model" value="eleven_multilingual_v2">
+
+  <label style="display:flex; align-items:center; gap:8px; margin-top:18px;">
+    <input type="checkbox" name="use_phonetic" style="width:auto; margin:0;">
+    Use phonetic respelling <span class="hint">(Claude rewrites the name for TTS, e.g. Siobhan &rarr; shi-VAWN)</span>
+  </label>
+
+  <label style="display:flex; align-items:center; gap:8px; margin-top:12px;">
+    <input type="checkbox" name="use_length_variants" id="lengthVariantsToggle" style="width:auto; margin:0;">
+    Auto-select video by name length <span class="hint">(Claude buckets the name short/medium/long and picks a matching video below)</span>
+  </label>
+
+  <label style="display:flex; align-items:center; gap:8px; margin-top:12px;">
+    <input type="checkbox" name="use_validation" style="width:auto; margin:0;">
+    Validate pronunciation <span class="hint">(transcribes the TTS audio via Scribe and flags likely mismatches — a triage signal, not a verdict)</span>
+  </label>
+
+  <div id="variantSlots" class="variant-box" style="display:none;">
+    <div style="font-size:12px; color:var(--text-dim); margin-bottom:10px;">Define each variant once, then reuse them for every future name.</div>
+
+    <div style="margin-bottom:14px;">
+      <label style="margin-top:0;">Short (1&ndash;2 syllables) &mdash; e.g. Tim, Mario</label>
+      <input name="short_video" placeholder="Video URL for short-name slot">
+      <div class="row" style="margin-top:6px;">
+        <div><input name="short_start" type="number" step="0.01" placeholder="start sec"></div>
+        <div><input name="short_end" type="number" step="0.01" placeholder="end sec"></div>
+      </div>
+    </div>
+
+    <div style="margin-bottom:14px;">
+      <label style="margin-top:0;">Medium (3 syllables) &mdash; e.g. Jennifer, Mohammed</label>
+      <input name="medium_video" placeholder="Video URL for medium-name slot">
+      <div class="row" style="margin-top:6px;">
+        <div><input name="medium_start" type="number" step="0.01" placeholder="start sec"></div>
+        <div><input name="medium_end" type="number" step="0.01" placeholder="end sec"></div>
+      </div>
+    </div>
+
+    <div>
+      <label style="margin-top:0;">Long (4+ syllables) &mdash; e.g. Katarzyna, Xiomara</label>
+      <input name="long_video" placeholder="Video URL for long-name slot">
+      <div class="row" style="margin-top:6px;">
+        <div><input name="long_start" type="number" step="0.01" placeholder="start sec"></div>
+        <div><input name="long_end" type="number" step="0.01" placeholder="end sec"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-block">
+    <label class="lane-label"><span class="lane-dot" style="background:var(--lane-batch);"></span> Batch run <span class="hint">(reruns the exact same settings N times, one after another, to measure a success ratio)</span></label>
+    <div class="row" style="align-items:flex-end;">
+      <div style="flex:0 0 90px;">
+        <input name="batch_count" type="number" min="1" max="20" value="5">
+      </div>
+      <div>
+        <button type="button" id="batchBtn" class="lane-btn">Run Batch</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-block">
+    <label class="lane-label"><span class="lane-dot" style="background:var(--lane-grid);"></span> Grid sweep <span class="hint">(cycles through every model &times; sync mode combination you check below)</span></label>
+    <div class="row">
+      <div>
+        <div style="font-size:12px; font-weight:600; color:var(--text-dim); margin-bottom:4px;">Models</div>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:normal; margin-top:4px;"><input type="checkbox" name="grid_models" value="lipsync-2" checked style="width:auto;"> lipsync-2</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:normal; margin-top:4px;"><input type="checkbox" name="grid_models" value="lipsync-2-pro" style="width:auto;"> lipsync-2-pro</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:normal; margin-top:4px;"><input type="checkbox" name="grid_models" value="sync-3" style="width:auto;"> sync-3</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:normal; margin-top:4px;"><input type="checkbox" name="grid_models" value="react-1" style="width:auto;"> react-1</label>
+      </div>
+      <div>
+        <div style="font-size:12px; font-weight:600; color:var(--text-dim); margin-bottom:4px;">Sync modes</div>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:normal; margin-top:4px;"><input type="checkbox" name="grid_modes" value="bounce" checked style="width:auto;"> bounce</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:normal; margin-top:4px;"><input type="checkbox" name="grid_modes" value="remap" style="width:auto;"> remap</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:normal; margin-top:4px;"><input type="checkbox" name="grid_modes" value="cut_off" style="width:auto;"> cut_off</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:normal; margin-top:4px;"><input type="checkbox" name="grid_modes" value="loop" style="width:auto;"> loop</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:normal; margin-top:4px;"><input type="checkbox" name="grid_modes" value="silence" style="width:auto;"> silence</label>
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px; align-items:flex-end;">
+      <div style="flex:0 0 140px;">
+        <label style="margin-top:0;">Runs per combo</label>
+        <input name="runs_per_combo" type="number" min="1" max="5" value="1">
+      </div>
+      <div>
+        <button type="button" id="gridBtn" class="lane-btn">Run Grid Sweep</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-block">
+    <label class="lane-label"><span class="lane-dot" style="background:var(--lane-names);"></span> Run a name list <span class="hint">(once your settings are dialed in, test them against a real batch of different names)</span></label>
+    <textarea name="names_list" rows="4" placeholder="One name per line, or comma-separated&#10;e.g.&#10;Mario&#10;Jennifer&#10;Katarzyna"></textarea>
+    <button type="button" id="namesBatchBtn" class="lane-btn" style="margin-top:8px;">Run Name List</button>
+  </div>
+
+  <div class="section-block">
+    <label class="lane-label"><span class="lane-dot" style="background:#8A8FA3;"></span> Safeguard fallback <span class="hint">(used by the customer-experience preview if generation fails or takes too long)</span></label>
+    <label style="margin-top:10px;">Fallback video URL</label>
+    <input name="fallback_video" placeholder="https://.../default-non-personalized-video.mp4">
+    <div class="row" style="margin-top:10px; align-items:flex-end;">
+      <div style="flex:0 0 180px;">
+        <label style="margin-top:0;">Fallback timeout (sec)</label>
+        <input name="fallback_timeout" type="number" min="10" max="120" value="45">
+      </div>
+    </div>
+  </div>
+
+  <button type="submit" id="submitBtn" class="lane-btn">Generate</button>
+
+  <button type="button" id="syncDiagBtn" style="width:100%; margin-top:10px; padding:10px; background:#3a3a3a; color:#fff; border:1px dashed #777;">
+    🔧 Run Synchronous Test (diagnostic — no threading, will wait ~1min)
+  </button>
+</form>
+
+<!-- Customer Experience Preview Modal — styled as a clean, branded customer-facing
+     page, deliberately distinct from the dark engineering console around it. -->
+<div id="customerModalOverlay" style="
+  display:none; position:fixed; inset:0; background:rgba(15,17,21,0.72);
+  z-index:1000; align-items:center; justify-content:center; padding:20px;
+">
+  <div id="customerModalCard" style="
+    background:#fff; border-radius:20px; max-width:440px; width:100%;
+    padding:36px 32px; position:relative; text-align:center;
+    box-shadow:0 20px 60px rgba(0,0,0,0.35);
+    font-family:'Inter',-apple-system,sans-serif;
+  ">
+    <button type="button" id="customerModalClose" style="
+      position:absolute; top:14px; right:16px; background:none; border:none;
+      font-size:22px; color:#9AA2B4; cursor:pointer; line-height:1; padding:4px;
+    ">&times;</button>
+
+    <!-- State 1: name entry -->
+    <div id="cmStateEntry">
+      <div style="font-size:34px; margin-bottom:10px;">👋</div>
+      <div style="font-family:'Cambria',serif; font-size:22px; font-weight:700; color:#1E2761; margin-bottom:8px;">
+        Get Your Personalized Video
+      </div>
+      <div style="color:#5A6478; font-size:14px; margin-bottom:22px;">
+        Enter your first name to see your personalized message.
+      </div>
+      <input id="cmNameInput" type="text" placeholder="Your first name" style="
+        width:100%; padding:13px 14px; border:1px solid #D8DCE8; border-radius:10px;
+        font-size:15px; margin-bottom:16px; text-align:center; box-sizing:border-box;
+      ">
+      <button type="button" id="cmSubmitBtn" style="
+        width:100%; padding:14px; background:#1E2761; color:#fff; border:none;
+        border-radius:10px; font-size:15px; font-weight:600; cursor:pointer;
+        font-family:'Sora',sans-serif;
+      ">Get My Video</button>
+    </div>
+
+    <!-- State 2: waiting -->
+    <div id="cmStateWaiting" style="display:none;">
+      <div style="
+        width:56px; height:56px; margin:0 auto 22px; border-radius:50%;
+        border:4px solid #E3E7F5; border-top-color:#1E2761;
+        animation:cmSpin 0.9s linear infinite;
+      "></div>
+      <div id="cmWaitingMessage" style="font-size:16px; color:#1E2761; font-weight:600; min-height:44px;">
+        One moment — we're retrieving your message...
+      </div>
+    </div>
+
+    <!-- State 3: video ready -->
+    <div id="cmStateVideo" style="display:none;">
+      <div style="font-family:'Cambria',serif; font-size:20px; font-weight:700; color:#1E2761; margin-bottom:16px;">
+        Here's your personalized message!
+      </div>
+      <video id="cmVideo" controls autoplay style="width:100%; border-radius:12px; background:#000;"></video>
+      <div id="cmFallbackNote" style="display:none; margin-top:10px; font-size:10.5px; color:#B8BCC8;">(fallback video shown)</div>
+      <button type="button" id="cmCloseBtn" style="
+        margin-top:20px; padding:11px 24px; background:#EEF0FA; color:#1E2761;
+        border:none; border-radius:10px; font-size:14px; font-weight:600; cursor:pointer;
+        font-family:'Sora',sans-serif;
+      ">Close</button>
+    </div>
+  </div>
+</div>
+<style>
+@keyframes cmSpin { to { transform: rotate(360deg); } }
+</style>
+
+<div id="status" style="display:none;"></div>
+<div id="result" style="display:none;"></div>
+<div id="batchResult" style="display:none;"></div>
+<div id="gridResult" style="display:none;"></div>
+<div id="namesBatchResult" style="display:none;"></div>
+
+<h2>History</h2>
+<div class="hint" style="margin-top:-10px; margin-bottom:14px;">Every run, from any of the buttons above — saved to disk, survives restarts.</div>
+<div id="history"></div>
+
+<script>
+const BASE_URL = "{{ base_path }}";  // e.g. "/pvm-tool" when hosted, "" locally
+const form = document.getElementById('genForm');
+const statusBox = document.getElementById('status');
+const resultBox = document.getElementById('result');
+const historyBox = document.getElementById('history');
+const batchResultBox = document.getElementById('batchResult');
+const gridResultBox = document.getElementById('gridResult');
+const namesBatchResultBox = document.getElementById('namesBatchResult');
+let pollTimer = null;
+let batchPollTimer = null;
+let gridPollTimer = null;
+let namesBatchPollTimer = null;
+
+// --- nudge buttons ---
+document.querySelectorAll('.nudge-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const targetInput = form.elements[btn.dataset.target];
+    const delta = parseFloat(btn.dataset.delta);
+    const current = parseFloat(targetInput.value) || 0;
+    const next = Math.max(0, current + delta);
+    targetInput.value = next.toFixed(2);
+  });
+});
+
+// --- show/hide the second-name-window block ---
+const doubleToggle = document.getElementById('doubleNameToggle');
+const doubleSlots = document.getElementById('doubleNameSlots');
+doubleToggle.addEventListener('change', () => {
+  doubleSlots.style.display = doubleToggle.checked ? 'block' : 'none';
+});
+const stitchToggle = document.getElementById('stitchToggle');
+const stitchSlots = document.getElementById('stitchSlots');
+stitchToggle.addEventListener('change', () => {
+  stitchSlots.style.display = stitchToggle.checked ? 'block' : 'none';
+});
+const thirdToggle = document.getElementById('thirdNameToggle');
+const thirdSlots = document.getElementById('thirdNameSlots');
+thirdToggle.addEventListener('change', () => {
+  thirdSlots.style.display = thirdToggle.checked ? 'block' : 'none';
+});
+
+// --- show/hide the length-variant config block ---
+const lengthToggle = document.getElementById('lengthVariantsToggle');
+const variantSlots = document.getElementById('variantSlots');
+lengthToggle.addEventListener('change', () => {
+  variantSlots.style.display = lengthToggle.checked ? 'block' : 'none';
+});
+
+// --- show/hide react-1-only fields ---
+const modelSelect = document.getElementById('modelSelect');
+const reactFields = document.getElementById('reactFields');
+modelSelect.addEventListener('change', () => {
+  reactFields.style.display = modelSelect.value === 'react-1' ? 'block' : 'none';
+});
+
+// --- batch run ---
+document.getElementById('batchBtn').addEventListener('click', async () => {
+  clearInterval(batchPollTimer);
+  statusBox.style.display = 'none';
+  resultBox.style.display = 'none';
+  gridResultBox.style.display = 'none';
+  namesBatchResultBox.style.display = 'none';
+  batchResultBox.style.display = 'block';
+  batchResultBox.innerHTML = '<div style="color:var(--text-dim);">Starting batch...</div>';
+
+  const formData = new FormData(form);
+  const res = await fetch(BASE_URL + '/generate-batch', { method: 'POST', body: formData });
+  const data = await res.json();
+
+  if (data.error) {
+    batchResultBox.innerHTML = `<div style="color:var(--fail);">Error: ${data.error}</div>`;
+    return;
+  }
+
+  batchPollTimer = setInterval(() => pollBatch(data.batch_uuid), 3000);
+  pollBatch(data.batch_uuid);
+});
+
+async function pollBatch(batchUuid) {
+  const res = await fetch(BASE_URL + '/batch/' + batchUuid + '?_=' + Date.now(), { cache: 'no-store' });
+  const data = await res.json();
+
+  const rateLine = data.success_rate != null
+    ? `<div style="font-size:20px; font-weight:700; margin-bottom:4px; font-family:'Sora',sans-serif;">
+         ${data.success_count}/${data.runs.length} succeeded
+         <span style="font-size:14px; font-weight:600; color:${data.success_rate >= 80 ? 'var(--success)' : 'var(--fail)'};">
+           (${data.success_rate}%)
+         </span>
+       </div>`
+    : '';
+
+  const progressLine = data.status === 'RUNNING'
+    ? `<div style="color:var(--text-dim); font-size:13px; margin-bottom:10px;">Running ${data.current} of ${data.total}...</div>`
+    : `<div style="color:var(--success); font-size:13px; margin-bottom:10px;">Batch complete.</div>`;
+
+  const runRows = data.runs.map(r => {
+    const badgeClass = r.status === 'COMPLETED' ? 'status-COMPLETED' : 'status-FAILED';
+    const vid = r.status === 'COMPLETED' && r.output_url
+      ? `<video controls src="${r.output_url}" style="max-width:200px; display:block; margin-top:6px;"></video>`
+      : `<div style="color:var(--fail); font-size:12px; margin-top:4px;">${r.error || 'failed'}</div>`;
+    return `
+      <div style="border-top:1px solid var(--border); padding:10px 0;">
+        <span class="status-badge ${badgeClass}">${r.status}</span>
+        <span style="margin-left:8px; font-size:12px; color:var(--text-dim);">Run ${r.run_number} &middot; ⏱ ${formatDuration(r.duration_seconds)}</span>
+        ${validationBadgeHtml(r.validation)}
+        ${vid}
+      </div>
+    `;
+  }).join('');
+
+  batchResultBox.innerHTML = `
+    <div class="result-panel">
+      ${rateLine}
+      ${progressLine}
+      ${runRows}
+    </div>
+  `;
+
+  if (data.status === 'DONE') {
+    clearInterval(batchPollTimer);
+    loadHistory();
+  }
+}
+
+// --- grid sweep ---
+document.getElementById('gridBtn').addEventListener('click', async () => {
+  clearInterval(gridPollTimer);
+  statusBox.style.display = 'none';
+  resultBox.style.display = 'none';
+  batchResultBox.style.display = 'none';
+  namesBatchResultBox.style.display = 'none';
+  gridResultBox.style.display = 'block';
+  gridResultBox.innerHTML = '<div style="color:var(--text-dim);">Starting grid sweep...</div>';
+
+  const formData = new FormData(form);
+  const res = await fetch(BASE_URL + '/generate-grid', { method: 'POST', body: formData });
+  const data = await res.json();
+
+  if (data.error) {
+    gridResultBox.innerHTML = `<div style="color:var(--fail);">Error: ${data.error}</div>`;
+    return;
+  }
+
+  gridPollTimer = setInterval(() => pollGrid(data.grid_uuid), 3000);
+  pollGrid(data.grid_uuid);
+});
+
+async function pollGrid(gridUuid) {
+  const res = await fetch(BASE_URL + '/grid/' + gridUuid + '?_=' + Date.now(), { cache: 'no-store' });
+  const data = await res.json();
+
+  const progressLine = data.status === 'RUNNING'
+    ? `<div style="color:var(--text-dim); font-size:13px; margin-bottom:14px;">Running ${data.current} of ${data.total}...</div>`
+    : `<div style="color:var(--success); font-size:13px; margin-bottom:14px;">Grid sweep complete.</div>`;
+
+  const comboBlocks = data.combos.map(combo => {
+    const rateColor = combo.success_rate >= 80 ? 'var(--success)' : (combo.success_rate == null ? 'var(--text-faint)' : 'var(--fail)');
+    const runsHtml = combo.runs.map(r => {
+      const badgeClass = r.status === 'COMPLETED' ? 'status-COMPLETED' : 'status-FAILED';
+      const vid = r.status === 'COMPLETED' && r.output_url
+        ? `<video controls src="${r.output_url}" style="max-width:180px; display:block; margin-top:4px;"></video>`
+        : `<div style="color:var(--fail); font-size:11.5px;">${r.error || 'failed'}</div>`;
+      return `<div style="margin-top:8px;">
+                <span class="status-badge ${badgeClass}" style="font-size:9.5px;">${r.status}</span>
+                <span style="font-size:11px; color:var(--text-faint); margin-left:4px;">⏱ ${formatDuration(r.duration_seconds)}</span>
+                ${validationBadgeHtml(r.validation)}
+                ${vid}
+              </div>`;
+    }).join('');
+
+    return `
+      <div style="border:1px solid var(--border); border-radius:10px; padding:14px; margin-bottom:12px; background:var(--panel-alt);">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <b>${combo.model}</b> &nbsp;/&nbsp; <b>${combo.sync_mode}</b>
+          </div>
+          <div style="font-weight:700; color:${rateColor};">
+            ${combo.success_count}/${combo.runs.length}${combo.success_rate != null ? ' (' + combo.success_rate + '%)' : ''}
+            ${combo.avg_duration != null ? `<span style="font-weight:400; color:var(--text-faint); font-size:12px;"> &middot; avg ⏱ ${formatDuration(combo.avg_duration)}</span>` : ''}
+          </div>
+        </div>
+        ${runsHtml}
+      </div>
+    `;
+  }).join('');
+
+  gridResultBox.innerHTML = `
+    <div class="result-panel">
+      ${progressLine}
+      ${comboBlocks}
+    </div>
+  `;
+
+  if (data.status === 'DONE') {
+    clearInterval(gridPollTimer);
+    loadHistory();
+  }
+}
+
+// --- name list batch ---
+document.getElementById('namesBatchBtn').addEventListener('click', async () => {
+  clearInterval(namesBatchPollTimer);
+  statusBox.style.display = 'none';
+  resultBox.style.display = 'none';
+  batchResultBox.style.display = 'none';
+  gridResultBox.style.display = 'none';
+  namesBatchResultBox.style.display = 'block';
+  namesBatchResultBox.innerHTML = '<div style="color:var(--text-dim);">Starting name list run...</div>';
+
+  const formData = new FormData(form);
+  const res = await fetch(BASE_URL + '/generate-names-batch', { method: 'POST', body: formData });
+  const data = await res.json();
+
+  if (data.error) {
+    namesBatchResultBox.innerHTML = `<div style="color:var(--fail);">Error: ${data.error}</div>`;
+    return;
+  }
+
+  namesBatchPollTimer = setInterval(() => pollNamesBatch(data.names_batch_uuid), 3000);
+  pollNamesBatch(data.names_batch_uuid);
+});
+
+async function pollNamesBatch(batchUuid) {
+  const res = await fetch(BASE_URL + '/names-batch/' + batchUuid + '?_=' + Date.now(), { cache: 'no-store' });
+  const data = await res.json();
+
+  const rateLine = data.success_rate != null
+    ? `<div style="font-size:20px; font-weight:700; margin-bottom:4px; font-family:'Sora',sans-serif;">
+         ${data.success_count}/${data.runs.length} succeeded
+         <span style="font-size:14px; font-weight:600; color:${data.success_rate >= 80 ? 'var(--success)' : 'var(--fail)'};">
+           (${data.success_rate}%)
+         </span>
+       </div>`
+    : '';
+
+  const progressLine = data.status === 'RUNNING'
+    ? `<div style="color:var(--text-dim); font-size:13px; margin-bottom:10px;">Running ${data.current} of ${data.total}...</div>`
+    : `<div style="color:var(--success); font-size:13px; margin-bottom:10px;">Name list complete.</div>`;
+
+  const runRows = data.runs.map(r => {
+    const badgeClass = r.status === 'COMPLETED' ? 'status-COMPLETED' : 'status-FAILED';
+    const vid = r.status === 'COMPLETED' && r.output_url
+      ? `<video controls src="${r.output_url}" style="max-width:200px; display:block; margin-top:6px;"></video>`
+      : `<div style="color:var(--fail); font-size:12px; margin-top:4px;">${r.error || 'failed'}</div>`;
+    const phoneticNote = r.phonetic_text ? ` <span style="color:var(--text-faint); font-size:11px;">(spoken as ${r.phonetic_text})</span>` : '';
+    return `
+      <div style="border-top:1px solid var(--border); padding:10px 0;">
+        <span class="status-badge ${badgeClass}">${r.status}</span>
+        <b style="margin-left:8px;">${r.name}</b>${phoneticNote}
+        <span style="margin-left:8px; font-size:12px; color:var(--text-dim);">⏱ ${formatDuration(r.duration_seconds)}</span>
+        ${validationBadgeHtml(r.validation)}
+        ${vid}
+      </div>
+    `;
+  }).join('');
+
+  namesBatchResultBox.innerHTML = `
+    <div class="result-panel">
+      ${rateLine}
+      ${progressLine}
+      ${runRows}
+    </div>
+  `;
+
+  if (data.status === 'DONE') {
+    clearInterval(namesBatchPollTimer);
+    loadHistory();
+  }
+}
+
+function validationBadgeHtml(validation) {
+  if (!validation || !validation.tier || validation.tier === 'unknown') return '';
+  const styles = {
+    high:       { bg: 'var(--success-bg)', color: 'var(--success)',    icon: '✓' },
+    borderline: { bg: 'var(--lane-batch-bg)', color: 'var(--lane-batch)', icon: '?' },
+    low:        { bg: 'var(--fail-bg)',    color: 'var(--fail)',       icon: '⚠' },
+  };
+  const s = styles[validation.tier];
+  if (!s) return '';
+  const transcript = (validation.transcript || '?').replace(/"/g, '&quot;');
+  const pct = Math.round((validation.similarity || 0) * 100);
+  return `<span class="status-badge" style="background:${s.bg}; color:${s.color}; margin-left:6px;" title="Heard: &quot;${transcript}&quot; — ${pct}% match">${s.icon} ${validation.tier}</span>`;
+}
+
+function validationTierHtml(validation) {
+  if (!validation || !validation.tier || validation.tier === 'unknown') return '';
+  const colors = { high: 'var(--success)', borderline: 'var(--lane-batch)', low: 'var(--fail)' };
+  const labels = { high: 'High confidence', borderline: 'Borderline — worth a listen', low: 'Low confidence — likely mismatch' };
+  const color = colors[validation.tier] || 'var(--text-dim)';
+  const label = labels[validation.tier] || validation.tier;
+  return `<div style="margin-bottom:8px; font-size:13px;">
+    Pronunciation check: <b style="color:${color};">${label}</b>
+    <span style="color:var(--text-faint); font-size:11.5px;"> (heard: "${validation.transcript || '?'}", ${Math.round((validation.similarity || 0) * 100)}% match)</span>
+  </div>`;
+}
+
+function formatDuration(seconds) {
+  if (seconds == null) return '';
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  return `${m}m ${s}s`;
+}
+
+// --- TEMPORARY: synchronous diagnostic test (no threading) ---
+document.getElementById('syncDiagBtn').addEventListener('click', async () => {
+  statusBox.style.display = 'block';
+  statusBox.textContent = 'Running synchronous test — no polling, this will just wait until it finishes (up to ~1-2 min)...';
+  resultBox.style.display = 'none';
+  batchResultBox.style.display = 'none';
+  gridResultBox.style.display = 'none';
+  namesBatchResultBox.style.display = 'none';
+
+  const formData = new FormData(form);
+  try {
+    const res = await fetch(BASE_URL + '/generate-sync-diagnostic', { method: 'POST', body: formData, cache: 'no-store' });
+    const data = await res.json();
+    statusBox.textContent = 'Sync test result: ' + JSON.stringify(data, null, 2);
+  } catch (e) {
+    statusBox.textContent = 'Sync test threw an error: ' + e;
+  }
+});
+
+// --- submit / generate ---
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  clearInterval(pollTimer);
+  resultBox.style.display = 'none';
+  batchResultBox.style.display = 'none';
+  gridResultBox.style.display = 'none';
+  namesBatchResultBox.style.display = 'none';
+  resultBox.innerHTML = '';
+  statusBox.style.display = 'block';
+  statusBox.textContent = 'Submitting...';
+
+  const formData = new FormData(form);
+  const res = await fetch(BASE_URL + '/generate', { method: 'POST', body: formData });
+  const data = await res.json();
+
+  if (data.error) {
+    statusBox.textContent = 'Error: ' + data.error;
+    return;
+  }
+
+  const jobUuid = data.job_uuid;
+  pollTimer = setInterval(() => pollStatus(jobUuid), 3000);
+  pollStatus(jobUuid);
+});
+
+let pollFailures = 0;
+async function pollStatus(jobUuid) {
+  let res, data;
+  try {
+    res = await fetch(BASE_URL + '/status/' + jobUuid + '?_=' + Date.now(), { cache: 'no-store' });
+    data = await res.json();
+  } catch (e) {
+    // 502/503/504 from the host while the server restarts or is busy: keep retrying.
+    pollFailures = (pollFailures || 0) + 1;
+    statusBox.textContent = 'Server not responding (it may be restarting) — retrying… (' + pollFailures + ')';
+    if (pollFailures >= 40) {
+      clearInterval(pollTimer);
+      statusBox.textContent = 'Lost contact with the server. Check History in a minute — the render may have finished.';
+    }
+    return;
+  }
+  pollFailures = 0;
+  if (res.status === 404) {
+    // The server restarted and forgot this in-memory job.
+    clearInterval(pollTimer);
+    statusBox.textContent = 'The server restarted and lost track of this run. Check History — the render may still have completed.';
+    loadHistory();
+    return;
+  }
+
+  if (data.status === 'COMPLETED') {
+    clearInterval(pollTimer);
+    statusBox.textContent = 'Done!';
+    resultBox.style.display = 'block';
+    const phoneticLine = data.phonetic_text
+      ? `<div style="margin-bottom:8px; color:var(--text-dim); font-size:13px;">Spoken as: <b style="color:var(--text);">${data.phonetic_text}</b></div>`
+      : '';
+    const bucketLine = data.length_bucket
+      ? `<div style="margin-bottom:8px; color:var(--text-dim); font-size:13px;">Video variant used: <b style="color:var(--text);">${data.length_bucket}</b></div>`
+      : '';
+    const validationLine = validationTierHtml(data.validation);
+    resultBox.innerHTML = `
+      <div class="result-panel">
+        ${phoneticLine}
+        ${bucketLine}
+        ${validationLine}
+        <a class="btn" href="${data.output_url}" target="_blank">▶ Open result</a>
+        <span class="duration-tag">⏱ ${formatDuration(data.duration_seconds)}${data.stitched ? ` &middot; render ${formatDuration(data.render_seconds)} + stitch ${formatDuration(data.stitch_seconds)}` : (data.slots ? ` &middot; ${data.slots} slot${data.slots>1?"s":""}` : "")}</span>
+        <video controls src="${data.output_url}"></video>
+      </div>
+    `;
+    loadHistory();
+  } else if (data.status === 'FAILED') {
+    clearInterval(pollTimer);
+    statusBox.textContent = 'Failed: ' + (data.error || 'unknown error');
+    loadHistory();
+  } else {
+    statusBox.textContent = 'Status: ' + data.status + ' ...';
+  }
+}
+
+// --- history panel ---
+function fillFormFromEntry(entry) {
+  for (const [key, value] of Object.entries(entry)) {
+    if (key === 'double_name') {
+      doubleToggle.checked = !!value;
+      doubleSlots.style.display = value ? 'block' : 'none';
+    } else if (key === 'stitch') {
+      stitchToggle.checked = !!value;
+      stitchSlots.style.display = value ? 'block' : 'none';
+    } else if (key === 'third_name') {
+      thirdToggle.checked = !!value;
+      thirdSlots.style.display = value ? 'block' : 'none';
+    } else if (form.elements[key] && form.elements[key].type !== 'checkbox') {
+      form.elements[key].value = value;
+    }
+  }
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function statusClass(status) {
+  if (status === 'COMPLETED') return 'status-COMPLETED';
+  if (status === 'FAILED') return 'status-FAILED';
+  return 'status-other';
+}
+
+function laneColorFor(source) {
+  if (source === 'batch') return 'var(--lane-batch)';
+  if (source === 'grid') return 'var(--lane-grid)';
+  if (source === 'names') return 'var(--lane-names)';
+  return 'var(--lane-generate)';
+}
+
+async function loadHistory() {
+  const res = await fetch(BASE_URL + '/history?_=' + Date.now(), { cache: 'no-store' });
+  const records = await res.json();
+  historyBox.innerHTML = '';
+
+  if (records.length === 0) {
+    historyBox.innerHTML = '<div class="empty-history">No runs yet — generate one above to see it here.</div>';
+    return;
+  }
+
+  records.forEach((rec) => {
+    const entry = rec.entry || {};
+    const div = document.createElement('div');
+    div.className = 'history-item';
+    div.style.borderLeft = `3px solid ${laneColorFor(rec.source)}`;
+
+    let videoHtml = '';
+    if (rec.status === 'COMPLETED' && rec.output_url) {
+      videoHtml = `<video controls src="${rec.output_url}"></video>
+                    <a class="reuse-btn" href="${rec.output_url}" target="_blank" style="margin-top:8px; display:inline-block;">Open</a>`;
+    } else if (rec.status === 'FAILED') {
+      videoHtml = `<div style="color:var(--fail);">${rec.error || 'failed'}</div>`;
+    }
+
+    const durationTag = rec.duration_seconds != null
+      ? `<span class="duration-tag">⏱ ${formatDuration(rec.duration_seconds)}</span>`
+      : '';
+
+    const phoneticNote = rec.phonetic_text
+      ? ` &nbsp;·&nbsp; spoken as <b>${rec.phonetic_text}</b>`
+      : '';
+
+    const reactNote = entry.lipsync_model === 'react-1'
+      ? ` &nbsp;·&nbsp; mode: ${entry.model_mode || 'lips'}${entry.emotion ? ', emotion: ' + entry.emotion : ''}`
+      : '';
+
+    const nameLabel = entry.text || rec.name || '';
+
+    const validationBadge = (() => {
+      if (!rec.validation || !rec.validation.tier || rec.validation.tier === 'unknown') return '';
+      const colors = { high: 'var(--success)', borderline: 'var(--lane-batch)', low: 'var(--fail)' };
+      const icons = { high: '✓', borderline: '?', low: '⚠' };
+      const color = colors[rec.validation.tier] || 'var(--text-dim)';
+      return ` &nbsp;·&nbsp; <span style="color:${color}; font-weight:600;">${icons[rec.validation.tier] || ''} pronunciation ${rec.validation.tier}</span>`;
+    })();
+
+    div.innerHTML = `
+      <div class="meta">
+        <span class="status-badge ${statusClass(rec.status)}">${rec.status}</span>
+        <span style="text-transform:uppercase; font-size:9.5px; color:${laneColorFor(rec.source)}; margin-left:6px; letter-spacing:0.04em;">${rec.source}</span>
+        ${durationTag}
+        <br>
+        <b>${nameLabel}</b> &nbsp;·&nbsp;
+        segment ${entry.segment_start}s&ndash;${entry.segment_end}s${rec.stitched ? ' <b>(stitched: intro + middle + outro)</b>' : ''}${rec.slots > 1 ? ' + ' + (entry.extra_slots || []).map(x => x.start + 's&ndash;' + x.end + 's').join(' + ') + ' <b>(' + rec.slots + ' slots)</b>' : ''} &nbsp;·&nbsp;
+        ${entry.sync_mode || ''} / ${entry.lipsync_model || ''} / temp ${entry.temperature ?? ''}${phoneticNote}${reactNote}${validationBadge}
+      </div>
+      ${videoHtml}
+      <button type="button" class="reuse-btn" style="margin-top:10px;">Reuse these settings</button>
+    `;
+
+    div.querySelector('.reuse-btn:last-of-type').addEventListener('click', () => fillFormFromEntry(entry));
+
+    historyBox.appendChild(div);
+  });
+}
+
+// load history on page open (survives page refresh as long as the server is still running)
+loadHistory();
+
+// ============================================================
+// Customer Experience Preview — simulates what an actual bank
+// customer sees: name entry -> friendly waiting animation ->
+// video plays automatically. Falls back seamlessly to a default
+// video if generation fails or exceeds the configured timeout.
+// ============================================================
+(function () {
+  const overlay = document.getElementById('customerModalOverlay');
+  const stateEntry = document.getElementById('cmStateEntry');
+  const stateWaiting = document.getElementById('cmStateWaiting');
+  const stateVideo = document.getElementById('cmStateVideo');
+  const nameInput = document.getElementById('cmNameInput');
+  const submitBtn = document.getElementById('cmSubmitBtn');
+  const waitingMessageEl = document.getElementById('cmWaitingMessage');
+  const videoEl = document.getElementById('cmVideo');
+  const fallbackNote = document.getElementById('cmFallbackNote');
+
+  let cmPollTimer = null;
+  let cmMessageTimer = null;
+  let cmStartTime = null;
+  let cmTimeoutMs = 45000;
+  let cmFallbackUrl = '';
+
+  function showState(state) {
+    stateEntry.style.display = state === 'entry' ? 'block' : 'none';
+    stateWaiting.style.display = state === 'waiting' ? 'block' : 'none';
+    stateVideo.style.display = state === 'video' ? 'block' : 'none';
+  }
+
+  function openModal() {
+    overlay.style.display = 'flex';
+    showState('entry');
+    nameInput.value = '';
+    fallbackNote.style.display = 'none';
+    videoEl.pause();
+    videoEl.removeAttribute('src');
+    setTimeout(() => nameInput.focus(), 50);
+  }
+
+  function closeModal() {
+    overlay.style.display = 'none';
+    clearInterval(cmPollTimer);
+    clearInterval(cmMessageTimer);
+    videoEl.pause();
+  }
+
+  function startWaitingMessages(name) {
+    const messages = [
+      `One moment, ${name} — we're retrieving your message...`,
+      "It's almost here...",
+      "Just a little longer...",
+      "Thanks for your patience — almost done...",
+    ];
+    let i = 0;
+    waitingMessageEl.textContent = messages[0];
+    cmMessageTimer = setInterval(() => {
+      i = (i + 1) % messages.length;
+      waitingMessageEl.textContent = messages[i];
+    }, 4000);
+  }
+
+  function showVideo(url, noteType) {
+    // noteType: 'fresh' (no note), 'fallback' (gray note), 'cached' (green note)
+    clearInterval(cmPollTimer);
+    clearInterval(cmMessageTimer);
+    videoEl.src = url;
+    if (noteType === 'fallback') {
+      fallbackNote.textContent = '(fallback video shown)';
+      fallbackNote.style.color = '#B8BCC8';
+      fallbackNote.style.display = 'block';
+    } else if (noteType === 'cached') {
+      fallbackNote.textContent = '(served instantly from cache)';
+      fallbackNote.style.color = '#1E8E5A';
+      fallbackNote.style.display = 'block';
+    } else {
+      fallbackNote.style.display = 'none';
+    }
+    showState('video');
+    videoEl.play().catch(() => {});
+  }
+
+  async function pollPreview(jobUuid) {
+    const elapsed = Date.now() - cmStartTime;
+
+    if (elapsed >= cmTimeoutMs) {
+      showVideo(cmFallbackUrl, 'fallback');
+      return;
+    }
+
+    try {
+      const res = await fetch(BASE_URL + '/status/' + jobUuid + '?_=' + Date.now(), { cache: 'no-store' });
+      const data = await res.json();
+
+      if (data.status === 'COMPLETED') {
+        showVideo(data.output_url, 'fresh');
+      } else if (data.status === 'FAILED') {
+        showVideo(cmFallbackUrl, 'fallback');
+      }
+      // else still in progress — keep polling, the interval will call this again
+    } catch (e) {
+      // Network hiccup mid-poll — don't fail the customer experience over it,
+      // just let the next poll tick try again (the overall timeout still applies).
+    }
+  }
+
+  document.getElementById('previewCustomerBtn').addEventListener('click', openModal);
+  document.getElementById('customerModalClose').addEventListener('click', closeModal);
+  document.getElementById('cmCloseBtn').addEventListener('click', closeModal);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
+
+  async function submitPreview() {
+    const name = nameInput.value.trim();
+    if (!name) { nameInput.focus(); return; }
+
+    cmFallbackUrl = form.elements['fallback_video'].value.trim();
+    const timeoutSec = parseFloat(form.elements['fallback_timeout'].value) || 45;
+    cmTimeoutMs = timeoutSec * 1000;
+
+    const video = form.elements['video'].value.trim();
+    const voiceId = form.elements['voice_id'].value.trim();
+
+    // Check whether this exact name + video + voice has already been
+    // rendered — if so, skip generation entirely and serve it instantly,
+    // mirroring the production pre-rendered-cache concept.
+    showState('waiting');
+    startWaitingMessages(name);
+    waitingMessageEl.textContent = 'Checking for your video...';
+
+    try {
+      const cacheParams = new URLSearchParams({ name, video, voice_id: voiceId });
+      const cacheRes = await fetch(BASE_URL + '/check-cache?' + cacheParams.toString() + '&_=' + Date.now(), { cache: 'no-store' });
+      const cacheData = await cacheRes.json();
+
+      if (cacheData.found) {
+        clearInterval(cmMessageTimer);
+        waitingMessageEl.textContent = 'Found it!';
+        setTimeout(() => showVideo(cacheData.output_url, 'cached'), 600);
+        return;
+      }
+    } catch (e) {
+      // Cache check failing shouldn't block the normal flow — fall through
+      // to a fresh generation below.
+    }
+
+    cmStartTime = Date.now();
+
+    const formData = new FormData(form);
+    formData.set('text', name);
+    formData.set('source', 'preview');
+
+    try {
+      const res = await fetch(BASE_URL + '/generate', { method: 'POST', body: formData, cache: 'no-store' });
+      const data = await res.json();
+
+      if (data.error) {
+        // Missing required fields (e.g. no video URL configured) — fall back
+        // immediately if one's set, otherwise just surface the entry screen again.
+        if (cmFallbackUrl) { showVideo(cmFallbackUrl, 'fallback'); }
+        else { showState('entry'); }
+        return;
+      }
+
+      cmPollTimer = setInterval(() => pollPreview(data.job_uuid), 3000);
+      pollPreview(data.job_uuid);
+    } catch (e) {
+      if (cmFallbackUrl) { showVideo(cmFallbackUrl, 'fallback'); }
+      else { showState('entry'); }
+    }
+  }
+
+  submitBtn.addEventListener('click', submitPreview);
+  nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitPreview(); });
+})();
+</script>
+
+</body>
+</html>
