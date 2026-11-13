@@ -411,25 +411,34 @@ def execute_pipeline(entry: dict, source: str = 'single') -> dict:
             return result
 
         entry['audio'] = aud_url
-        entry.pop('audio2', None)
+        entry.pop('extra_slots', None)
 
-        # 2b. Optional second name window ("name, oh name ..."). Reuses the same
-        # audio unless a separate second-take text was given (different emphasis).
-        if entry.get('double_name') and entry.get('segment2_end', 0) > entry.get('segment2_start', 0):
-            if entry.get('text2'):
-                t2 = dict(tts_entry)
-                t2['text'] = entry['text2']
-                aud2_url = _upload(voice_service.generate_speech(t2))
-                if not aud2_url:
+        # 2b. Optional extra name windows (slots 2 and 3), all in the same render.
+        # Each slot reuses the main audio unless it has its own take text
+        # (different emphasis/intonation, e.g. "Tanya!" vs "Tanya.").
+        extra = []
+        for n in (2, 3):
+            on = entry.get('double_name') if n == 2 else entry.get('third_name')
+            st, en = entry.get(f'segment{n}_start', 0), entry.get(f'segment{n}_end', 0)
+            if not on or en <= st:
+                continue
+            take = entry.get(f'text{n}')
+            if take:
+                tn = dict(tts_entry)
+                tn['text'] = take
+                url_n = _upload(voice_service.generate_speech(tn))
+                if not url_n:
                     result['status'] = 'FAILED'
-                    result['error'] = 'Failed to upload second-take audio.'
+                    result['error'] = f'Failed to upload slot {n} take audio.'
                     result['duration_seconds'] = round(time.time() - started_at, 1)
                     record_history(entry, result, source)
                     return result
             else:
-                aud2_url = aud_url
-            entry['audio2'] = aud2_url
-        result['slots'] = 2 if entry.get('audio2') else 1
+                url_n = aud_url
+            extra.append({'audio': url_n, 'start': st, 'end': en})
+        if extra:
+            entry['extra_slots'] = extra
+        result['slots'] = 1 + len(extra)
 
         # 3. Submit the lipsync job (reuses existing LipSyncProcessor, temperature-aware)
         response_json = lipsync_service.process_lip_sync(entry)
@@ -550,6 +559,10 @@ def build_entry_from_form(form) -> dict:
         'segment2_start': float(form.get('segment2_start') or 0),
         'segment2_end': float(form.get('segment2_end') or 0),
         'text2': form.get('text2', '').strip(),
+        'third_name': form.get('third_name') == 'on',
+        'segment3_start': float(form.get('segment3_start') or 0),
+        'segment3_end': float(form.get('segment3_end') or 0),
+        'text3': form.get('text3', '').strip(),
         'sync_mode': form.get('sync_mode', 'bounce'),
         'lipsync_model': form.get('lipsync_model', 'lipsync-2'),
         'tts_model': form.get('tts_model', 'eleven_multilingual_v2'),
