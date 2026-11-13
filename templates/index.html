@@ -320,6 +320,38 @@
     <input name="text2" placeholder="e.g. Mario!  (different emphasis for the 2nd mention)">
   </div>
 
+
+  <label style="display:flex; align-items:center; gap:8px; margin-top:12px;">
+    <input type="checkbox" name="third_name" id="thirdNameToggle" style="width:auto; margin:0;">
+    Third name slot <span class="hint">(e.g. closing &ldquo;thank you, Name&rdquo;)</span>
+  </label>
+  <div id="thirdNameSlots" style="display:none;">
+    <div class="row">
+      <div>
+      <label>3rd window start (sec)</label>
+      <div class="nudge-row">
+        <button type="button" class="nudge-btn" data-target="segment3_start" data-delta="-0.5">-0.5</button>
+        <button type="button" class="nudge-btn" data-target="segment3_start" data-delta="-0.1">-0.1</button>
+        <input name="segment3_start" type="number" step="0.01" value="8.00">
+        <button type="button" class="nudge-btn" data-target="segment3_start" data-delta="0.1">+0.1</button>
+        <button type="button" class="nudge-btn" data-target="segment3_start" data-delta="0.5">+0.5</button>
+      </div>
+    </div>
+      <div>
+      <label>3rd window end (sec)</label>
+      <div class="nudge-row">
+        <button type="button" class="nudge-btn" data-target="segment3_end" data-delta="-0.5">-0.5</button>
+        <button type="button" class="nudge-btn" data-target="segment3_end" data-delta="-0.1">-0.1</button>
+        <input name="segment3_end" type="number" step="0.01" value="9.00">
+        <button type="button" class="nudge-btn" data-target="segment3_end" data-delta="0.1">+0.1</button>
+        <button type="button" class="nudge-btn" data-target="segment3_end" data-delta="0.5">+0.5</button>
+      </div>
+    </div>
+    </div>
+    <label>Third-take text <span class="hint">(optional &mdash; blank reuses slot 1 audio)</span></label>
+    <input name="text3" placeholder="e.g. Tanya.  (falling tone for the closing)">
+  </div>
+
   <label>Voice ID <span class="hint">(your ElevenLabs voice)</span></label>
   <input name="voice_id" value="s3TPKV1kjDlVtZbl4Ksh" required>
 
@@ -598,6 +630,11 @@ const doubleToggle = document.getElementById('doubleNameToggle');
 const doubleSlots = document.getElementById('doubleNameSlots');
 doubleToggle.addEventListener('change', () => {
   doubleSlots.style.display = doubleToggle.checked ? 'block' : 'none';
+});
+const thirdToggle = document.getElementById('thirdNameToggle');
+const thirdSlots = document.getElementById('thirdNameSlots');
+thirdToggle.addEventListener('change', () => {
+  thirdSlots.style.display = thirdToggle.checked ? 'block' : 'none';
 });
 
 // --- show/hide the length-variant config block ---
@@ -949,6 +986,9 @@ function fillFormFromEntry(entry) {
     if (key === 'double_name') {
       doubleToggle.checked = !!value;
       doubleSlots.style.display = value ? 'block' : 'none';
+    } else if (key === 'third_name') {
+      thirdToggle.checked = !!value;
+      thirdSlots.style.display = value ? 'block' : 'none';
     } else if (form.elements[key] && form.elements[key].type !== 'checkbox') {
       form.elements[key].value = value;
     }
@@ -1022,7 +1062,7 @@ async function loadHistory() {
         ${durationTag}
         <br>
         <b>${nameLabel}</b> &nbsp;·&nbsp;
-        segment ${entry.segment_start}s&ndash;${entry.segment_end}s${rec.slots === 2 ? ' + ' + entry.segment2_start + 's&ndash;' + entry.segment2_end + 's <b>(2 slots)</b>' : ''} &nbsp;·&nbsp;
+        segment ${entry.segment_start}s&ndash;${entry.segment_end}s${rec.slots > 1 ? ' + ' + (entry.extra_slots || []).map(x => x.start + 's&ndash;' + x.end + 's').join(' + ') + ' <b>(' + rec.slots + ' slots)</b>' : ''} &nbsp;·&nbsp;
         ${entry.sync_mode || ''} / ${entry.lipsync_model || ''} / temp ${entry.temperature ?? ''}${phoneticNote}${reactNote}${validationBadge}
       </div>
       ${videoHtml}
