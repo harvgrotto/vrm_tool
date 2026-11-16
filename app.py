@@ -418,13 +418,15 @@ def normalize_clip(src: str, dst: str, W: int, H: int, fps: float):
         raise RuntimeError(f"ffmpeg normalize failed: {proc.stderr[-600:]}")
 
 
-def stitch_three(intro_path: str, middle_path: str, outro_path: str, out_path: str,
+def stitch_three(intro_path: str, middle_path, outro_path: str, out_path: str,
                  out_width: int = 0):
     """intro + shared middle + outro -> one MP4. Each clip is normalised to the intro's
     size/fps separately, then joined with a stream-copy concat (no re-encode, near-zero
     memory). The normalised middle is cached next to the original, so the long shared
     clip is only processed once."""
     for pth in (intro_path, middle_path, outro_path):
+        if pth is None:
+            continue
         i = probe_clip(pth)
         if not i['width'] or not i['has_audio']:
             raise ValueError(f"Clip {os.path.basename(pth)} is missing a video or audio stream.")
@@ -438,11 +440,13 @@ def stitch_three(intro_path: str, middle_path: str, outro_path: str, out_path: s
         W = out_width - out_width % 2
     fps = ref['fps'] or 30
 
-    mid_norm = f"{middle_path}.{W}x{H}x{fps}.norm.mp4"
-    if not os.path.exists(mid_norm):
-        tmp_mid = mid_norm + ".part.mp4"
-        normalize_clip(middle_path, tmp_mid, W, H, fps)
-        os.replace(tmp_mid, mid_norm)
+    mid_norm = None
+    if middle_path:
+        mid_norm = f"{middle_path}.{W}x{H}x{fps}.norm.mp4"
+        if not os.path.exists(mid_norm):
+            tmp_mid = mid_norm + ".part.mp4"
+            normalize_clip(middle_path, tmp_mid, W, H, fps)
+            os.replace(tmp_mid, mid_norm)
 
     intro_norm = intro_path + ".norm.mp4"
     outro_norm = outro_path + ".norm.mp4"
@@ -451,7 +455,7 @@ def stitch_three(intro_path: str, middle_path: str, outro_path: str, out_path: s
         normalize_clip(intro_path, intro_norm, W, H, fps)
         normalize_clip(outro_path, outro_norm, W, H, fps)
         with open(list_path, 'w') as f:
-            for pth in (intro_norm, mid_norm, outro_norm):
+            for pth in [x for x in (intro_norm, mid_norm, outro_norm) if x]:
                 f.write("file '" + pth.replace("'", "'\\''") + "'\n")
         cmd = [get_ffmpeg_exe(), '-y', '-hide_banner', '-loglevel', 'error',
                '-f', 'concat', '-safe', '0', '-i', list_path,
@@ -614,7 +618,7 @@ def execute_pipeline(entry: dict, source: str = 'single') -> dict:
                 outro_path = os.path.join(MEDIA_DIR, f"{run_id}_outro.mp4")
                 download_to(res[0].get('output_url'), intro_path)
                 download_to(res[1].get('output_url'), outro_path)
-                middle_path = get_shared_clip(entry['middle_video'])
+                middle_path = get_shared_clip(entry['middle_video']) if entry.get('middle_video') else None
                 final_path = os.path.join(MEDIA_DIR, f"{run_id}.mp4")
                 stitch_started = time.time()
                 stitch_three(intro_path, middle_path, outro_path, final_path,
@@ -823,9 +827,8 @@ def generate():
 
     if not entry['video'] or not entry['text'] or not entry['voice_id']:
         return jsonify({'error': 'video, text, and voice_id are required.'}), 400
-    if entry['stitch'] and (not entry['outro_video'] or not entry['middle_video']
-                            or entry['outro_end'] <= entry['outro_start']):
-        return jsonify({'error': 'Stitch mode needs an outro video, outro window, and middle video.'}), 400
+    if entry['stitch'] and (not entry['outro_video'] or entry['outro_end'] <= entry['outro_start']):
+        return jsonify({'error': 'Stitch mode needs an outro video and outro window (the middle video is optional).'}), 400
 
     job_uuid = str(uuid.uuid4())
     JOBS[job_uuid] = {'status': 'STARTING', 'entry': entry, 'created_at': time.time()}
